@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parseFormation } from './formations.js';
 
-export const KINDS = ['weapon', 'pet', 'team', 'battle', 'reroll', 'neonutil', 'hunt', 'equipment', 'shards', 'checklist', 'cooldown', 'error', 'unknown', 'input'];
+export const KINDS = ['weapon', 'pet', 'team', 'battle', 'boss', 'reroll', 'neonutil', 'hunt', 'equipment', 'shards', 'checklist', 'cooldown', 'error', 'unknown', 'input'];
 const idPattern = /^\d{17,20}$/;
 const plain = (value) => value?.toJSON ? value.toJSON() : value;
 export function commandInfo(content = '') {
@@ -54,6 +54,7 @@ export function classify(m, source) {
   if (/These weapons belong to|<@!?\d{17,20}>'s Weapons|\*\*ID:\*\*\s*`[A-Z0-9]+`/i.test(text)) return 'weapon';
   if (/owo team add|Current Streak:.*Highest Streak:/i.test(text)) return 'team';
   if ((m.embeds ?? []).some(e => /'s pets$/i.test(e.author?.name ?? ''))) return 'pet';
+  if (/A Guild Boss Appeared!|You (?:defeated|failed to defeat) a guild boss/i.test(text)) return 'boss';
   if (/owobot\.com\/battle-log\?|You (?:won|lost) in \d+ turns|It's a tie/i.test(text)) return 'battle';
   if (/hunt is empowered|spent [\d,]+ .*and caught an? /i.test(text)) return 'hunt';
   if (/is now wielding/i.test(text)) return 'equipment';

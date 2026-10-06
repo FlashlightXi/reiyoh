@@ -13,7 +13,9 @@
     "check:public": "node scripts/check-public.js"
   },
   "dependencies": {
-    "discord.js": "^14.22.1"
+    "discord.js": "^14.22.1",
+    "sharp": "^0.35.5",
+    "tesseract.js": "^6.0.1"
   },
   "license": "MIT"
 }

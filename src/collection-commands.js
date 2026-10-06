@@ -8,6 +8,7 @@ export const HELP = `**Reiyo · 情報と相談**
 \`gai 相談内容\` — 手持ちを調べてAIに相談
 \`gx team\` — 編成・装備・出典
 \`gx pets\` — 観測したペット情報
+\`gx boss\` / \`gx boss logs\` — 最新ボス・本人の詳細ログ
 \`gx battle\` — 記録した勝敗と直近の戦闘
 \`gx me\` — 自分の観測記録
 \`gx briefing\` — 相談用の情報を書き出す
@@ -30,7 +31,7 @@ export function normalizeCommand(content = '') {
   return legacy[lower]??text;
 }
 
-export function createCollectionCommands({ config, state, writer, store, client, reply, isManager }) {
+export function createCollectionCommands({ config, state, writer, store, bosses, client, reply, isManager }) {
   // Serialize settings changes; do not publish unpersisted settings to the collector.
   let settings = Promise.resolve();
   const saveSettings = (change) => {
@@ -63,6 +64,21 @@ export function createCollectionCommands({ config, state, writer, store, client,
   }
   return async function handle(message, command) {
     const lower = command.toLowerCase();
+    if (lower === 'gx boss' || lower === 'gx boss logs') {
+      if (message.guildId !== config.guildId || !config.channelIds.includes(message.channelId)) {
+        await reply(message,'このチャンネルは収集対象外です。'); return true;
+      }
+      if (lower === 'gx boss') await message.reply(bosses.payload(message.guildId,message.channelId));
+      else {
+        const logs=bosses.logs(message.guildId,message.channelId,message.author.id);
+        const saved=logs.filter(r=>r.status==='saved');
+        const text=logs.slice(0,10).map(r=>`[戦闘ログ](https://owobot.com/battle-log?uuid=${r.uuid}) • ${r.status}`).join('\n');
+        const body=JSON.stringify(saved.map(r=>JSON.parse(r.body)));
+        if(saved.length && Buffer.byteLength(body)<7_000_000) await message.reply({content:text||'記録待ちです。',files:[{attachment:Buffer.from(body),name:'boss-battle-logs.json'}],allowedMentions:{parse:[],repliedUser:false}});
+        else await reply(message,text||'このチャンネルに本人と確認できたボス戦ログはまだありません。');
+      }
+      return true;
+    }
     if (lower === 'gx admin') { await reply(message, ADMIN_HELP); return true; }
     if (lower === 'gx help') { await reply(message, HELP); return true; }
     if (lower === 'gx collect status') {

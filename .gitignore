@@ -14,3 +14,5 @@ aa.txt
 *.log
 coverage/
 .DS_Store
+
+*.traineddata

@@ -1,3 +1,4 @@
+import { createBossRecords } from './boss-records.js';
 import {handlePetPage} from './pet-pagination.js';
 import {emojiText} from './display.js';
 import {
@@ -24,6 +25,7 @@ config.guildId = state.guildId ?? config.guildId;
 config.observerBotIds = state.observerBotIds ?? [];
 let scopeReady = false;
 const observations = openObservations(path.join(path.dirname(config.statePath), 'observations.sqlite'));
+const bosses = createBossRecords({dbPath:path.join(path.dirname(config.statePath),'observations.sqlite'),config,onError:reportError});
 const tracker = new Tracker(state);
 const writer = createStateWriter(config.statePath);
 const logger = createLogger(config.logPath);
@@ -85,7 +87,7 @@ async function capture(message, event) {
   if (shouldCapture(message, config)) await logger.write(message, event);
 }
 
-const collectionCommands = createCollectionCommands({ config, state, writer, store: observations, client, reply,
+const collectionCommands = createCollectionCommands({ config, state, writer, store: observations, bosses, client, reply,
   isManager: (message) => message.member?.permissions.has(PermissionFlagsBits.ManageGuild) });
 
 const aiCommands=createAiCommands({config});
@@ -120,6 +122,7 @@ client.once('clientReady', async () => {
     state.guildId = config.guildId;
     await writer.save(state);
     scopeReady = true;
+    bosses.start();
   console.log(`Reiyo connected as ${client.user.tag}; watching ${config.channelIds.length} channel(s)`);
     const guild = client.guilds.cache.get(config.guildId);
     if (guild) await registerSlashG(guild);
@@ -237,6 +240,7 @@ client.on('error', reportError);
 async function shutdown() {
   client.destroy();
   try { await Promise.all([logger.flush(), writer.flush(), battleLogs.flush()]); } catch (error) { reportError(error); }
+  await bosses.close();
   observations.close();
   process.exit(0);
 }
