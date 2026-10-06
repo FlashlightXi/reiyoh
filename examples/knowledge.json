@@ -1,0 +1,16 @@
+[
+  {
+    "id": "example-composition",
+    "status": "fictional-example",
+    "tags": [
+      "example",
+      "構成"
+    ],
+    "finding": "架空例：支援役Aと攻撃役Bの資源循環を比べる。",
+    "action": "消費と補給を同じ周期で比較する。",
+    "limits": "形式説明用の架空値。実ゲームへの適用には検証が必要。",
+    "sources": [
+      "operator-provided experiment"
+    ]
+  }
+]

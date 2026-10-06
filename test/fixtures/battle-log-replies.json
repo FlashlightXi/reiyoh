@@ -1,0 +1,29 @@
+[
+  {
+    "kind": "embed",
+    "embeds": [
+      {
+        "description": "[Log Link](https://owobot.com/battle-log?uuid=00000000-0000-0000-0000-000000000001)",
+        "author": {
+          "icon_url": "https://cdn.discordapp.com/avatars/111111111111111111/fixture.png?size=128"
+        }
+      }
+    ],
+    "components": []
+  },
+  {
+    "kind": "boss-leaderboard",
+    "embeds": [],
+    "components": [
+      {
+        "type": 17,
+        "components": [
+          {
+            "type": 10,
+            "content": "### Top 10 Damage Dealt\n**__`Rank`__ __` Damage`__ __`Username`__**\n**`1   `** ` 77,123` <@700000000000000001> [`📜`](https://owobot.com/battle-log?uuid=00000000-0000-0000-0000-000000000002) [`📜`](https://owobot.com/battle-log?uuid=00000000-0000-0000-0000-000000000003) [`📜`](https://owobot.com/battle-log?uuid=00000000-0000-0000-0000-000000000004)"
+          }
+        ]
+      }
+    ]
+  }
+]

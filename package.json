@@ -1,0 +1,19 @@
+{
+  "name": "reiyoh",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node src/bot.js",
+    "backfill": "node src/backfill.js",
+    "test": "node --test",
+    "advisor": "node src/advisor-cli.js",
+    "check:public": "node scripts/check-public.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.22.1"
+  },
+  "license": "MIT"
+}
