@@ -5,7 +5,7 @@ import path from 'node:path';
 import {createAdvisorTools} from './advisor-tools.js';
 import {runAdvisor} from './advisor-client.js';
 
-const labels={get_observation_detail:'必要な詳細を取得',get_player_context:'編成・装備を取得',get_pet_roster:'ペット一覧を取得',get_formation_history:'編成の履歴を確認',get_battle_summary:'戦績を集計',search_strategy_knowledge:'過去の知見を検索',get_analysis_record:'分析の条件を確認',example_resource_balance:'補給と消費を比較'};
+const labels={get_observation_detail:'必要な詳細を取得',get_player_context:'編成・装備を取得',get_pet_roster:'ペット一覧を取得',get_formation_history:'編成の履歴を確認',get_battle_summary:'戦績と連勝を集計',get_command_usage:'コマンドの使い方を確認',search_strategy_knowledge:'過去の知見を検索',get_analysis_record:'分析の条件を確認',example_resource_balance:'補給と消費を比較'};
 export function aiPayload({stage,trace=[],answer,usage=[],apiMs=0,completedAt,error=false}) {
   const sum=key=>usage.length&&usage.every(u=>Number.isFinite(u?.[key]))?usage.reduce((n,u)=>n+u[key],0).toLocaleString('en-US'):'…';
   const log=trace.slice(-7).map(t=>`-# ${icon(t.ok===false?'lost':t.done?'tool':'pending')} ${labels[t.name]??'情報を確認'}`).join('\n');

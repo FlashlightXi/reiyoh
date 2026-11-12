@@ -3,18 +3,27 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parseFormation } from './formations.js';
+import { parseBattleResult, parseTeamStreak } from './streaks.js';
 
 export const KINDS = ['weapon', 'pet', 'team', 'battle', 'boss', 'reroll', 'neonutil', 'hunt', 'equipment', 'shards', 'checklist', 'cooldown', 'error', 'unknown', 'input'];
 const idPattern = /^\d{17,20}$/;
 const plain = (value) => value?.toJSON ? value.toJSON() : value;
+const COMMAND_KINDS = [
+  ['reroll', null], // weapon verbs with rr/reroll arguments
+  ['weapon', /^(w|wep|weapons?)$/],
+  ['team', /^(teams?|setteam|useteams|squads?|tm)$/],
+  ['pet', /^pets?$/],
+  ['battle', /^(battle|b)$/],
+  // Boss replies are a separate mode: never count them as normal battles or streak results.
+  ['boss', /^boss$/],
+];
 export function commandInfo(content = '') {
-  const match = content.trim().match(/^(?:owo\s*|g)(weapons?|wep|w|teams?|setteam|useteams|squads?|tm|pets?|battle|b|boss|hunt|h|pray|curse)(?=\s|$)\s*(.*)$/i);
+  const match = content.trim().match(/^(owo\s*|g)(weapons?|wep|w|teams?|setteam|useteams|squads?|tm|pets?|battle|b|boss|hunt|h|pray|curse|crate|wc|weaponshard|ws|dismantle|dmt|battlesetting|bs|checklist|cl|zoo|inventory|inv|autohunt|huntbot|hb)(?=\s|$)\s*(.*)$/i);
   if (!match) return null;
-  const verb = match[1].toLowerCase(), args = match[2];
-  const kind = /^(w|wep|weapons?)$/.test(verb) ? (/^(rr|reroll)(?:\s|$)/i.test(args) ? 'reroll' : 'weapon')
-    : /^(teams?|setteam|useteams|squads?|tm)$/.test(verb) ? 'team' : /^pets?$/.test(verb) ? 'pet'
-      : /^(battle|b|boss)$/.test(verb) ? 'battle' : 'unknown';
-  return { kind, verb, args };
+  const verb = match[2].toLowerCase(), args = match[3];
+  let kind = COMMAND_KINDS.find(([, pattern]) => pattern?.test(verb))?.[0] ?? 'unknown';
+  if (kind === 'weapon' && /^(rr|reroll)(?:\s|$)/i.test(args)) kind = 'reroll';
+  return { kind, verb, args, prefix: match[1].trim().toLowerCase() };
 }
 
 export function snapshotMessage(message) {
@@ -68,16 +77,16 @@ export function classify(m, source) {
 export function observedFacts(m, kind) {
   const text = messageText(m);
   const footer = (m.embeds ?? []).map(e => e.footer?.text ?? '').join('\n');
-  const outcome = footer.match(/You (won|lost) in (\d+) turns|It's a tie(?: in (\d+) turns)?/i);
+  const result = parseBattleResult(footer);
   const page = text.match(/Page\s+(\d+)\s*\/\s*(\d+)/i);
   return {
     hunt: kind === 'hunt' ? {xp: Number(text.match(/gained \*\*([\d,]+)xp/i)?.[1]?.replaceAll(',','')) || null} : null,
     shards: kind === 'shards' ? {count:Number(text.match(/have \*\*([\d,]+)\*\* Weapon Shards/i)?.[1]?.replaceAll(',',''))} : null,
     formation: kind === 'team' ? parseFormation(m) : null,
+    teamStreak: kind === 'team' ? parseTeamStreak(text) : null,
     weaponIds: [...new Set([...text.matchAll(/\*\*ID:\*\*\s*`([A-Z0-9]+)`/gi)].map(m => m[1]))],
     page: page ? { number: Number(page[1]), total: Number(page[2]), completeInventory: false } : null,
-    battle: kind === 'battle' ? { outcome: outcome ? outcome[1]?.toLowerCase() ?? 'tie' : 'unknown',
-      turns: outcome ? Number(outcome[2] ?? outcome[3]) || null : null,
+    battle: kind === 'battle' ? { ...result,
       visibleTeams: (m.embeds ?? []).flatMap(e => e.fields ?? []).map(f => ({ label: f.name, display: f.value })) } : null,
     inventoryConfirmed: false,
     reroll: kind === 'reroll' ? 'observed-preview-or-result; verify-with-weapon-detail' : null,

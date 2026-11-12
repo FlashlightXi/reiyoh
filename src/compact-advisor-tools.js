@@ -14,7 +14,16 @@ export function compactAdvisorTools(tools){
   if(name==='get_player_context')return {formations:r.formations.slice(-3).map(form),observations:r.observations.map(o=>({kind:o.kind,source:source(o.source),preview:clean(o.display).slice(0,220),more:clean(o.display).length>220})),coverage:'観測済み表示。現在の全所持・選択中編成は要確認。',truncated:r.truncated};
   if(name==='get_pet_roster')return {pets:r.petDetails.map(d=>({source:source(d.source),pets:(d.fields??[]).map(f=>({name:clean(f.name),stats:clean(f.value)}))})),formationEntries:r.petDetails.length?undefined:r.entries.map(e=>({pet:e.species?.name,level:e.level,stats:e.stats,weapon:e.weaponId})),coverage:r.coverage,truncated:r.truncated};
   if(name==='get_formation_history')return {history:r.history.slice(-6).map(e=>({...form(e),changes:e.changes})),coverage:'同一メッセージの表示ページ内で比較',truncated:r.truncated||r.history.length>6};
-  if(name==='get_battle_summary')return {counts:r.counts,total:r.total,recent:r.recent.slice(0,5).map(b=>({outcome:b.outcome,turns:b.turns,source:source(b.source)})),truncated:r.truncated,coverage:'収集済み返信の集計'};
+  if(name==='get_battle_summary'){
+   const st=r.streak,at=x=>x&&{...x,source:x.source?source(x.source):undefined};
+   return {counts:r.counts,total:r.total,winRate:r.winRate,
+    streak:st&&{current:{value:st.current.value,basis:st.current.basis,asOf:st.current.asOf?source(st.current.asOf):null},highest:at(st.highest),
+     breaks:{count:st.breaks.count,largest:at(st.breaks.largest),recent:st.breaks.recent.slice(0,5).map(at)},xp:st.xp,bonuses:st.bonuses.slice(0,5).map(at),
+     basisNote:'reported=OwO表示値。estimated=表示値+その後に観測した勝利。observed-lower-bound=このチャンネルで観測した連勝のみで、実際の連勝はこれ以上。'},
+    bossReplies:r.bossReplies,
+    recent:r.recent.slice(0,10).map(b=>({outcome:b.outcome,turns:b.turns,streak:b.streak,xp:b.xp,bonusXp:b.bonusXp??undefined,source:source(b.source)})),truncated:r.truncated,coverage:'収集済み返信の集計。ボス戦は別枠'};
+  }
+  if(name==='get_command_usage')return {totals:r.totals,prefixes:r.prefixes,forms:r.forms.slice(0,25).map(f=>({form:f.form,count:f.count,lastAt:f.lastAt,replies:f.replies})),truncated:r.truncated||r.forms.length>25,coverage:'このチャンネルで観測した本人の入力。未観測の形は未確認'};
   if(name==='search_strategy_knowledge')return r.slice(0,3).map(c=>({id:c.id,finding:c.finding,action:c.action,limits:c.limits,sources:c.sources}));
   return r;
  }};
