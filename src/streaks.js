@@ -5,15 +5,16 @@ const number = (value) => value == null ? null : Number(String(value).replaceAll
 export function parseBattleResult(footer = '') {
   const result = footer.match(/You (won|lost) in (\d+) turns?|It's a tie(?: in (\d+) turns?)?/i);
   const outcome = result ? result[1]?.toLowerCase() ?? 'tie' : 'unknown';
-  const lost = footer.match(/lost your streak(?: of\s*\**([\d,]+))?/i);
+  const lost = footer.match(/streak ended at\s*\**([\d,]+)|lost your streak(?: of\s*\**([\d,]+))?/i);
   const shown = footer.match(/(?<!highest\s)\bstreak\s*[:：]\s*\**([\d,]+)/i);
-  const xp = footer.match(/gained\s+\**([\d,]+)\**(?:\s*\+\s*\**([\d,]+)\**)?\s*xp/i);
+  // Current footers print one total (`+2,174 xp`); the older form could split a bonus (`gained 200 + 2000 xp`).
+  const xp = footer.match(/gained\s+\**([\d,]+)\**(?:\s*\+\s*\**([\d,]+)\**)?\s*xp/i) ?? footer.match(/\+\s*\**([\d,]+)\**\s*xp/i);
   return {
     outcome,
     turns: result ? Number(result[2] ?? result[3]) || null : null,
     // The value OwO printed after this battle. A loss without a printed value stays null here.
     streak: shown ? number(shown[1]) : null,
-    lostStreak: lost?.[1] ? number(lost[1]) : null,
+    lostStreak: lost?.[1] ?? lost?.[2] ? number(lost[1] ?? lost[2]) : null,
     xp: xp ? number(xp[1]) : null,
     bonusXp: xp?.[2] ? number(xp[2]) : null,
   };

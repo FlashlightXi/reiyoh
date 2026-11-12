@@ -32,6 +32,11 @@ test('戦闘フッターからOwO表示の連勝・切れた連勝・XPとボー
   assert.deepEqual(parseBattleResult('You lost in 5 turns! Your team gained 50 xp! You lost your streak of 12 wins...'),
     {outcome:'lost',turns:5,streak:null,lostStreak:12,xp:50,bonusXp:null});
   assert.equal(parseBattleResult("It's a tie in 20 turns! Streak: 7").streak,7);
+  assert.deepEqual(parseBattleResult('You won in 3 turns!  |  +2,174 xp  |  Streak: 250'),{outcome:'won',turns:3,streak:250,lostStreak:null,xp:2174,bonusXp:null});
+  assert.deepEqual(parseBattleResult('You lost in 8 turns!  |  +50 xp  |  Streak ended at 1,799'),{outcome:'lost',turns:8,streak:null,lostStreak:1799,xp:50,bonusXp:null});
+  assert.deepEqual(parseBattleResult("It's a tie in 24 turns!  |  +100 xp  |  Streak: 248"),{outcome:'tie',turns:24,streak:248,lostStreak:null,xp:100,bonusXp:null});
+  assert.deepEqual(parseBattleResult("Battle was too long! It's a tie! Your team gained 100 xp! Streak: 54"),{outcome:'tie',turns:null,streak:54,lostStreak:null,xp:100,bonusXp:null});
+  assert.deepEqual(parseBattleResult('PlayerA / 1,427 Streak wins!'),{outcome:'unknown',turns:null,streak:null,lostStreak:null,xp:null,bonusXp:null});
   assert.equal(parseBattleResult('You won in 3 turns!').streak,null);
   assert.deepEqual(parseTeamStreak('Current Streak: 41 | Highest Streak: 1,205'),{current:41,highest:1205});
 });
