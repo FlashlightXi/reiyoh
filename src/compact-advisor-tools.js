@@ -3,7 +3,7 @@ const source=s=>({messageId:s.messageId,url:s.url,at:s.sourceAt});
 const form=r=>({source:source(r.source),page:r.formation.presetPage,active:r.formation.active,slots:r.formation.slots.map(s=>({position:s.position,pet:s.species?.name,level:s.level,weapon:s.weaponId,stats:s.stats}))});
 export function compactAdvisorTools(tools){
  const details={type:'function',function:{name:'get_observation_detail',description:'概要に含まれるmessageIdのペット・武器詳細を必要なときに取得する。',parameters:{type:'object',properties:{messageId:{type:'string',pattern:'^[0-9]{17,20}$'}},required:['messageId'],additionalProperties:false}}};
- return {definitions:[...(tools.definitions??[]),details],invoke(name,args={}){
+ return {bossHistory:tools.bossHistory?options=>tools.bossHistory(options):undefined,definitions:[...(tools.definitions??[]),details],invoke(name,args={}){
   if(name==='get_observation_detail'){
    if(Object.keys(args).some(k=>k!=='messageId')||!/^\d{17,20}$/.test(args.messageId))throw Error('Invalid arguments');
    const r=tools.invoke('get_player_context').observations.find(r=>r.source.messageId===args.messageId);
@@ -15,6 +15,14 @@ export function compactAdvisorTools(tools){
   if(name==='get_pet_roster')return {pets:r.petDetails.map(d=>({source:source(d.source),pets:(d.fields??[]).map(f=>({name:clean(f.name),stats:clean(f.value)}))})),formationEntries:r.petDetails.length?undefined:r.entries.map(e=>({pet:e.species?.name,level:e.level,stats:e.stats,weapon:e.weaponId})),coverage:r.coverage,truncated:r.truncated};
   if(name==='get_formation_history')return {history:r.history.slice(-6).map(e=>({...form(e),changes:e.changes})),coverage:'同一メッセージの表示ページ内で比較',truncated:r.truncated||r.history.length>6};
   if(name==='get_battle_summary')return {counts:r.counts,total:r.total,recent:r.recent.slice(0,5).map(b=>({outcome:b.outcome,turns:b.turns,source:source(b.source)})),truncated:r.truncated,coverage:'収集済み返信の集計'};
+  if(name==='get_boss_history'){
+   const damages=r.mails.map(m=>m.damage).filter(Number.isFinite).sort((a,b)=>a-b);
+   return {counts:r.counts,medianDamage:damages.length?damages[Math.floor(damages.length/2)]:null,
+    recentMails:r.mails.slice(0,8).map(m=>({outcome:m.outcome,damage:m.damage,rank:m.rank,rewards:m.rewards,at:m.source.sourceAt,logs:m.logUuids.length})),
+    savedLogs:r.logs.filter(l=>l.status==='saved').length,pendingLogs:r.logs.filter(l=>l.status==='pending').length,
+    latestBoard:r.boards[0]?{expires:r.boards[0].expires,fighters:r.boards[0].fighters,defeated:r.boards[0].defeated}:null,
+    truncated:r.truncated,coverage:r.limitations.join(' ')};
+  }
   if(name==='search_strategy_knowledge')return r.slice(0,3).map(c=>({id:c.id,finding:c.finding,action:c.action,limits:c.limits,sources:c.sources}));
   return r;
  }};

@@ -6,7 +6,9 @@ const require=createRequire(import.meta.url);
 export function withExtensions(base,scope){
  const file=process.env.REIYOH_TOOLS_MODULE;
  if(!file)return base;
- const context=Object.freeze({...scope,channelIds:Object.freeze([...scope.channelIds])});
+ // Host-scoped, read-only data for trusted calculators. Scope stays fixed by the host.
+ const data=Object.freeze({bossHistory:options=>base.bossHistory?base.bossHistory(options):null});
+ const context=Object.freeze({...scope,channelIds:Object.freeze([...scope.channelIds]),data});
  const extension=require(path.resolve(file)).createTools(context);
  const names=new Set(base.definitions.map(d=>d.function.name));
  for(const d of extension.definitions){
