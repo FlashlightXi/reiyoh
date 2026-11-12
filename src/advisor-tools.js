@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { classify, commandInfo, messageText, observedFacts } from './observations.js';
 import { parseTeamStreak, summarizeStreak } from './streaks.js';
 import { parseFormation, formationChanges } from './formations.js';
+import { ownedBossLogUuids } from './boss-records.js';
 
 const noArgs = { type:'object', properties:{}, additionalProperties:false };
 export const ADVISOR_TOOLS = [
@@ -11,6 +12,7 @@ export const ADVISOR_TOOLS = [
   ['get_formation_history','表示パネル内のページ別の編成観測と差分。別メッセージの同一プリセット対応は未確定。',noArgs],
   ['get_battle_summary','通常戦の勝敗・勝率と連勝（OwO表示値を優先、根拠付き）、連勝が切れた実績、観測XPをメッセージ単位で集計。ボス戦は別枠。',noArgs],
   ['get_command_usage','本人がこのチャンネルで実際に入力したOwOコマンドの形・回数・OwOの返信種別（待機・エラー等）を返す。',noArgs],
+  ['get_boss_history','本人のボス討伐メール（勝敗・与ダメ・順位・報酬）と保存済み詳細ログの有無を集計する。ボス表示は同チャンネルの最新数件。',noArgs],
   ['search_strategy_knowledge','過去の分析の知見と成立条件を探す。古い手持ちを現在値へ転用しない。',
     {type:'object',properties:{query:{type:'string',maxLength:200}},required:['query'],additionalProperties:false}],
   ['get_analysis_record','許可された過去分析カードをIDで読む。任意ファイルや他人の個別分析は読めない。',
@@ -141,7 +143,40 @@ export function createAdvisorTools({dbPath,guildId,userId,channelIds,includePers
         'Reply links use Discord references or a single input within 20 seconds; noLinkedReply does not prove OwO ignored the command.',
         'A form that was never observed is unverified here, not invalid.']};
   }
+  function bossHistory({includeLogs=false,limit=50,maxLogBytes=20_000_000}={}) {
+    if(!Number.isInteger(limit)||limit<1||limit>200||!Number.isInteger(maxLogBytes)||maxLogBytes<0||maxLogBytes>50_000_000)throw Error('Invalid boss history options');
+    const empty={scope:context,mails:[],fights:[],boards:[],logs:[],counts:{won:0,lost:0},truncated:false};
+    if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='boss_events'").get())return {...empty,limitations:['ボス記録はまだ作成されていません。']};
+    const events=db.prepare(`SELECT * FROM boss_events WHERE guild_id=? AND channel_id IN (${channelIds.map(()=>'?').join(',')}) ORDER BY source_at DESC,seq DESC LIMIT 2001`)
+      .all(guildId,...channelIds).map(r=>({...r,data:JSON.parse(r.record)}));
+    const truncated=events.length>2000;
+    const link=r=>({messageId:r.message_id,channelId:r.channel_id,sourceAt:r.source_at,url:`https://discord.com/channels/${r.guild_id}/${r.channel_id}/${r.message_id}`});
+    const seen=new Set(),mails=[],fights=[],boards=[],uuids=new Map();
+    for(const r of events.slice(0,2000)) {
+      if(seen.has(r.message_id))continue; seen.add(r.message_id); // later edits of the same message are not new fights
+      const own=ownedBossLogUuids(r,userId);
+      for(const u of own)if(!uuids.has(u))uuids.set(u,link(r));
+      const d=r.data;
+      if(d.type==='mail'&&r.actor_id===userId)mails.push({source:link(r),outcome:d.outcome,damage:d.damage,rank:d.rank,received:d.received,rewards:d.rewards,logUuids:own});
+      else if(d.type==='fight'&&own.length)fights.push({source:link(r),logUuids:own});
+      else if(d.type==='board'&&boards.length<5)boards.push({source:link(r),expires:d.expires,fighters:d.fighters,defeated:d.defeated,ranking:d.ranking?.slice(0,1500)??null});
+    }
+    let bytes=0;
+    const logs=[...uuids].slice(0,limit*4).map(([uuid,source])=>{
+      const row=db.prepare('SELECT status,length(body) AS size,body FROM battle_logs WHERE uuid=?').get(uuid);
+      const entry={uuid,source,status:row?.status??'unknown',bytes:row?.size??0};
+      if(includeLogs&&row?.status==='saved'&&bytes+row.size<=maxLogBytes){
+        try{entry.logs=JSON.parse(JSON.parse(row.body).logs);bytes+=row.size;}catch{entry.status='unparsed';}
+      } else if(includeLogs&&row?.status==='saved') entry.omitted='size-limit';
+      return entry;
+    });
+    const counts={won:mails.filter(m=>m.outcome==='won').length,lost:mails.filter(m=>m.outcome==='lost').length};
+    return {scope:context,counts,mails:mails.slice(0,limit),fights:fights.slice(0,limit),boards,logs,
+      truncated:truncated||mails.length>limit||fights.length>limit||uuids.size>limit*4,
+      limitations:['討伐メールは本人が表示したものだけ。参加した全ボス戦の網羅は未確認。','ログは本人に帰属が確認できたリンクのみ。','ボス表示と討伐メールの対応付けは行わない。']};
+  }
   return {
+    bossHistory,
     definitions:ADVISOR_TOOLS,
     invoke(name,args={}) {
       if(!args || typeof args!=='object'||Array.isArray(args))throw Error('Invalid tool arguments');
@@ -160,6 +195,7 @@ export function createAdvisorTools({dbPath,guildId,userId,channelIds,includePers
       if(name==='get_formation_history')return formations();
       if(name==='get_battle_summary')return battles();
       if(name==='get_command_usage')return commands();
+      if(name==='get_boss_history')return bossHistory();
       if(name==='search_strategy_knowledge') {
         const tokens=args.query.toLowerCase().split(/[\s、,]+/).filter(Boolean);
         return allowed().map(card=>({card,score:tokens.reduce((n,t)=>n+Number(JSON.stringify(card).toLowerCase().includes(t)),0)}))

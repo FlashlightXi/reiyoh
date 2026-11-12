@@ -37,6 +37,16 @@ export function parseBoss(m) {
     rewards, links: extractBattleLogEntries(m), uuids: [...new Set(extractBattleLogEntries(m).map(x => x.uuid))] };
 }
 
+// A link belongs to a user only through its own row/embed owner, or a single-link mail the user opened.
+export function ownedBossLogUuids(event, user) {
+  return (event.data.links ?? []).filter(link => {
+    if (link.ambiguousRow) return false;
+    const owner = link.rowOwnerId ?? (link.needsRowOwner ? null : link.authorId);
+    if (owner) return owner === user;
+    return !link.needsRowOwner && event.data.type === 'mail' && event.data.uuids.length === 1 && event.actor_id === user;
+  }).map(link => link.uuid);
+}
+
 export async function boundedFetch(url, limit, fetcher = fetch) {
   const response = await fetcher(url, { signal: AbortSignal.timeout(20000), redirect: 'error' });
   if (!response.ok) throw Error(`HTTP ${response.status}`);
@@ -151,12 +161,7 @@ export function createBossRecords({ dbPath, config, fetcher = fetch, ocr = recog
       return cardPayload(blocks);
     },
     logs(guild,channel,user) {
-      const uuids=[...new Set(scoped(guild,channel).flatMap(r=>(r.data.links??[]).filter(link=>{
-        if(link.ambiguousRow)return false;
-        const owner=link.rowOwnerId ?? (link.needsRowOwner ? null : link.authorId);
-        if(owner)return owner===user;
-        return !link.needsRowOwner && r.data.type==='mail' && r.data.uuids.length===1 && r.actor_id===user;
-      }).map(link=>link.uuid)))];
+      const uuids=[...new Set(scoped(guild,channel).flatMap(r=>ownedBossLogUuids(r,user)))];
       return uuids.map(uuid=>db.prepare('SELECT uuid,status,body FROM battle_logs WHERE uuid=?').get(uuid)).filter(Boolean);
     },
     async close() { closed=true; clearInterval(this.timer); await pending; db.close(); },

@@ -3,7 +3,7 @@ const source=s=>({messageId:s.messageId,url:s.url,at:s.sourceAt});
 const form=r=>({source:source(r.source),page:r.formation.presetPage,active:r.formation.active,slots:r.formation.slots.map(s=>({position:s.position,pet:s.species?.name,level:s.level,weapon:s.weaponId,stats:s.stats}))});
 export function compactAdvisorTools(tools){
  const details={type:'function',function:{name:'get_observation_detail',description:'概要に含まれるmessageIdのペット・武器詳細を必要なときに取得する。',parameters:{type:'object',properties:{messageId:{type:'string',pattern:'^[0-9]{17,20}$'}},required:['messageId'],additionalProperties:false}}};
- return {definitions:[...(tools.definitions??[]),details],invoke(name,args={}){
+ return {bossHistory:tools.bossHistory?options=>tools.bossHistory(options):undefined,definitions:[...(tools.definitions??[]),details],invoke(name,args={}){
   if(name==='get_observation_detail'){
    if(Object.keys(args).some(k=>k!=='messageId')||!/^\d{17,20}$/.test(args.messageId))throw Error('Invalid arguments');
    const r=tools.invoke('get_player_context').observations.find(r=>r.source.messageId===args.messageId);
@@ -24,6 +24,14 @@ export function compactAdvisorTools(tools){
     recent:r.recent.slice(0,10).map(b=>({outcome:b.outcome,turns:b.turns,streak:b.streak,xp:b.xp,bonusXp:b.bonusXp??undefined,source:source(b.source)})),truncated:r.truncated,coverage:'収集済み返信の集計。ボス戦は別枠'};
   }
   if(name==='get_command_usage')return {totals:r.totals,prefixes:r.prefixes,forms:r.forms.slice(0,25).map(f=>({form:f.form,count:f.count,lastAt:f.lastAt,replies:f.replies})),truncated:r.truncated||r.forms.length>25,coverage:'このチャンネルで観測した本人の入力。未観測の形は未確認'};
+  if(name==='get_boss_history'){
+   const damages=r.mails.map(m=>m.damage).filter(Number.isFinite).sort((a,b)=>a-b);
+   return {counts:r.counts,medianDamage:damages.length?damages[Math.floor(damages.length/2)]:null,
+    recentMails:r.mails.slice(0,8).map(m=>({outcome:m.outcome,damage:m.damage,rank:m.rank,rewards:m.rewards,at:m.source.sourceAt,logs:m.logUuids.length})),
+    savedLogs:r.logs.filter(l=>l.status==='saved').length,pendingLogs:r.logs.filter(l=>l.status==='pending').length,
+    latestBoard:r.boards[0]?{expires:r.boards[0].expires,fighters:r.boards[0].fighters,defeated:r.boards[0].defeated}:null,
+    truncated:r.truncated,coverage:r.limitations.join(' ')};
+  }
   if(name==='search_strategy_knowledge')return r.slice(0,3).map(c=>({id:c.id,finding:c.finding,action:c.action,limits:c.limits,sources:c.sources}));
   return r;
  }};
