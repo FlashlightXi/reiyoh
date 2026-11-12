@@ -43,7 +43,7 @@ Developer PortalでMessage Content Intentを有効にし、対象チャンネル
 
 知識カードには `id, tags, finding, action, limits, sources` を付け、編成・目的・成立条件・検証結果・例外・出典を短くまとめます。`ownerId` を付けたカードは公開チャンネルのAIから除外され、運用者用CLIでは一致する本人に限定して参照されます。ownerIdなしのカードは共通知識として公開回答に使われます。
 
-計算モジュールは `definitions`（function tool定義）と `invoke(name,args)` を返します。scopeにはホストで確定した `guildId, userId, channelIds, visibility` が渡ります。モジュール側でも引数・試行数・閲覧権限を検証し、条件・出典・未対応範囲を結果に添えてください。`visibility: 'channel'` では同チャンネルへ結果が出ます。個別の検証を公開したくない場合、そのモードでdefinitionsを空にしてください。モデルからモジュールパスを変更する経路はありません。これはローカルコードの拡張口であり、信頼できるモジュールだけを設定してください。
+計算モジュールは `definitions`（function tool定義）と `invoke(name,args)` を返します。scopeにはホストで確定した `guildId, userId, channelIds, visibility` と、読み取り専用の `data.bossHistory({includeLogs, limit, maxLogBytes})` が渡ります。後者は本人の討伐メールと、本人に帰属が確認できた保存済み詳細ログ（`includeLogs` でJSON化済みの本文、既定20MB上限）を返します。モジュール側でも引数・試行数・閲覧権限を検証し、条件・出典・未対応範囲を結果に添えてください。`visibility: 'channel'` では同チャンネルへ結果が出ます。個別の検証を公開したくない場合、そのモードでdefinitionsを空にしてください。モデルからモジュールパスを変更する経路はありません。これはローカルコードの拡張口であり、信頼できるモジュールだけを設定してください。
 
 運用者用CLI：`npm run advisor -- GUILD_ID USER_ID CHANNEL_ID "相談文"`。対象範囲を指定できるため、運用者自身が権限を確認して使用します。
 
