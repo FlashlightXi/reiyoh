@@ -15,7 +15,7 @@ export const HELP = `**Reiyo · 情報と相談**
 \`gx me\` — 自分の観測記録
 \`gx briefing\` — 相談用の情報を書き出す
 \`gx logs\` / \`gx logs export\` — 戦闘URLの記録切替・取得
-\`gx bj\` / \`gx bj auto\` — OwO blackjack の最適手だけを押せるようにする・連続ヒットを自動で進める（ON/OFF）
+\`gx bj off/on/auto\` — OwO blackjack の最適手表示（\`gx bj\` で今のモードと説明）
 \`gx emoji\` — カウントダウン絵文字
 \`gx admin\` — 収集設定・記録の診断（管理者向け）`;
 const ADMIN_HELP = `**Reiyo · 管理**

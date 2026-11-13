@@ -189,6 +189,9 @@ export function createBlackjackHelper({
     const auto = value ?? !hint.auto;
     return { enabled: auto ? true : hint.enabled, auto };
   });
+  const modeOf = (userId) => (autoOn(userId) ? 'auto' : enabled(userId) ? 'on' : 'off');
+  const setMode = (userId, mode) =>
+    saveHint(userId, () => ({ enabled: mode !== 'off', auto: mode === 'auto' })).then(() => mode);
 
   function track(messageId, channelId) {
     let entry = games.get(messageId);
@@ -297,19 +300,20 @@ export function createBlackjackHelper({
   }
 
   return {
-    observe, observeReaction, setEnabled, setAuto, enabled,
+    observe, observeReaction, setEnabled, setAuto, setMode, modeOf, enabled,
     pending: () => Promise.all([...games.values()].map((entry) => entry.chain)),
   };
 }
 
-export function blackjackAutoText({ enabled, auto }) {
-  return auto
-    ? `**blackjack 自動ヒット: ON**\n最適手の1択表示に加えて、${HIT} を押した後もヒットが最適なら、令夭があなたの ${HIT} を外して次のヒットを進めます（OwO はリアクションを外すことも押したと判定するため）。スタンドや手が変わる場面は、これまでどおりあなたが押します。\n\`gx bj auto off\` で止められます。`
-    : `**blackjack 自動ヒット: OFF**\n${enabled ? '1択表示は続けます。押すのは毎回あなたです。' : '令夭はリアクションに触れません。'}`;
-}
+export const BLACKJACK_MODES = {
+  off: '通常どおり。令夭はリアクションに触れません。',
+  on: `最適でない方を消して最適手だけを残します（押すのはあなた）。`,
+  auto: `on に加えて、${HIT} を押した後も次がヒットなら令夭が2回目のヒットを進めます。`,
+};
 
-export function blackjackSettingText(on) {
-  return on
-    ? `**blackjack 最適手: ON**\nOwO blackjack の進行中、最適でない方のリアクション（${HIT} ヒット / ${STAND} スタンド）を令夭がまとめて消し、押せるのを最適手の1つだけにします。カードが増えるたびに両方を消して最適手を令夭が付け直すので、毎回残っている1つを1回押すだけです。\n-# 令夭に「メッセージの管理」権限が無いチャンネルでは、最適手に令夭のリアクションを重ねて示します。52枚1デッキ・ディーラーは17以上で停止・同点と両者バーストは引き分け、という公開版OwOのルールで期待値を厳密計算しています。\`gx bj\` でOFF、\`gx bj auto\` で連続ヒットを令夭が進める自動ヒット。`
-    : `**blackjack 最適手: OFF**\n令夭はリアクションに触れません。\`gx bj\` で再びONにできます。`;
+// Shown for `gx bj` (current mode) and after `gx bj off|on|auto` (changed).
+export function blackjackModeText(mode, changed = false) {
+  const lines = Object.entries(BLACKJACK_MODES)
+    .map(([name, text]) => `${name === mode ? '▶' : '・'} \`gx bj ${name}\` — ${text}`);
+  return `**blackjack 最適手: ${mode.toUpperCase()}**${changed ? ' に切り替えました' : ''}\n${lines.join('\n')}\n-# OwO の公開ソースのルール（52枚1デッキ・ディーラーは17以上で停止・同点と両者バーストは引き分け）で期待値を厳密計算。消す・付け直すには令夭に「メッセージの管理」権限が必要で、無いチャンネルでは最適手に令夭のリアクションを重ねるだけです。`;
 }

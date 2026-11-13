@@ -16,7 +16,7 @@ import { createBattleLogService } from './battle-log-links.js';
 import { openObservations, snapshotMessage } from './observations.js';
 import { createAiCommands } from './ai-commands.js';
 import { createCollectionCommands, normalizeCommand } from './collection-commands.js';
-import { blackjackAutoText, blackjackSettingText, createBlackjackHelper } from './blackjack.js';
+import { blackjackModeText, createBlackjackHelper } from './blackjack.js';
 
 const config = readConfig();
 const state = await loadState(config.statePath);
@@ -187,12 +187,13 @@ client.on('messageCreate', async (message) => {
     const command = normalized.toLowerCase();
     if (!scopeReady || message.guildId !== config.guildId) return;
     if (!message.author.bot && await aiCommands(message, normalized)) return;
-    const blackjackCommand = /^gx (?:bj|blackjack)(?:\s+(auto))?(?:\s+(on|off))?$/.exec(command);
+    const blackjackCommand = /^gx (?:bj|blackjack)(?:\s+(off|on|auto)(?:\s+(on|off))?)?$/.exec(command);
     if (!message.author.bot && blackjackCommand) {
       try {
-        const value = blackjackCommand[2] ? blackjackCommand[2] === 'on' : undefined;
-        if (blackjackCommand[1]) await reply(message, blackjackAutoText(await blackjack.setAuto(message.author.id, value)));
-        else await reply(message, blackjackSettingText(await blackjack.setEnabled(message.author.id, value)));
+        // `gx bj auto off` (older form) means back to plain `on`.
+        const mode = blackjackCommand[1] === 'auto' && blackjackCommand[2] === 'off' ? 'on' : blackjackCommand[1];
+        if (mode) await reply(message, blackjackModeText(await blackjack.setMode(message.author.id, mode), true));
+        else await reply(message, blackjackModeText(blackjack.modeOf(message.author.id)));
       } catch (error) {
         reportError(error);
         await reply(message, '設定を保存できませんでした。切替前の状態のままです。');

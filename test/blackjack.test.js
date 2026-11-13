@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { adviseBlackjack, bestAction, cardRank, createBlackjackHelper, HIT, parseBlackjack, STAND } from '../src/blackjack.js';
+import { adviseBlackjack, bestAction, blackjackModeText, cardRank, createBlackjackHelper, HIT, parseBlackjack, STAND } from '../src/blackjack.js';
 
 const OWO = '408785106942164992', USER = '111111111111111111';
 const avatar = `https://cdn.discordapp.com/avatars/${USER}/hash.png?size=128`;
@@ -171,4 +171,20 @@ test('autoモードでもスタンドが最適なら外さない・autoがOFFな
   second.helper.observe(hand('<:2c:3> <:3h:4> <a:2sf:5>', '<a:10df:1> <:cardback:2>', { raw: true }), 'update');
   await second.helper.pending();
   assert.deepEqual(calls, []);
+});
+
+test('gx bj off/on/auto のモード切替と表示', async () => {
+  const { helper, state } = setup();
+  assert.equal(helper.modeOf(USER), 'off');
+  assert.equal(await helper.setMode(USER, 'auto'), 'auto');
+  assert.deepEqual(state.users[USER].blackjackHint, { enabled: true, auto: true });
+  assert.equal(helper.modeOf(USER), 'auto');
+  await helper.setMode(USER, 'on');
+  assert.equal(helper.modeOf(USER), 'on');
+  await helper.setMode(USER, 'off');
+  assert.equal(helper.modeOf(USER), 'off');
+  const text = blackjackModeText('on', true);
+  assert.match(text, /最適手: ON\*\* に切り替えました/);
+  assert.match(text, /▶ `gx bj on`/);
+  for (const mode of ['off', 'on', 'auto']) assert.match(text, new RegExp(`gx bj ${mode}`));
 });
