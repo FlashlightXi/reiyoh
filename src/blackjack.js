@@ -145,6 +145,7 @@ const other = (emoji) => (emoji === HIT ? STAND : HIT);
 const statusOf = (error) => error?.status ?? error?.httpStatus ?? error?.code;
 
 // Leaves only the better choice on OwO's message:
+// - once OwO has dealt the next card, removes the player's previous click so the next choice is one fresh click,
 // - removes OwO's reaction for the worse choice (needs Manage Messages; the player's own reactions are never touched),
 // - re-adds the better choice as Reiyo's reaction when OwO's one was removed earlier, so it stays clickable.
 // OwO's collector only checks which emoji the player adds, so who added the reaction first does not matter.
@@ -182,7 +183,7 @@ export function createBlackjackHelper({
   function track(messageId, channelId) {
     let entry = games.get(messageId);
     if (!entry) {
-      entry = { channelId, want: null, own: null, removed: new Set(), chain: Promise.resolve(), started: false };
+      entry = { channelId, want: null, own: null, removed: new Set(), ownerReacted: new Set(), hand: null, chain: Promise.resolve(), started: false };
       games.set(messageId, entry);
       if (games.size > RECENT_LIMIT) games.delete(games.keys().next().value);
     }
@@ -201,6 +202,20 @@ export function createBlackjackHelper({
       if (status === 403 || status === 50013) { canPrune = false; return false; }
       if (status === 404 || status === 10014) return false; // OwO has not added it yet; the reaction event handles it.
       throw error;
+    }
+  }
+
+  // After OwO has acted on the player's click, clear it so the next choice is a single fresh click.
+  async function clearOwner(entry, messageId) {
+    if (!canPrune || !entry.ownerId) return;
+    for (const emoji of [...entry.ownerReacted]) {
+      try { await removeReaction(entry.channelId, messageId, emoji, entry.ownerId); }
+      catch (error) {
+        const status = statusOf(error);
+        if (status === 403 || status === 50013) { canPrune = false; return; }
+        if (status !== 404 && status !== 10014) throw error;
+      }
+      entry.ownerReacted.delete(emoji);
     }
   }
 
@@ -234,14 +249,18 @@ export function createBlackjackHelper({
     const want = advice?.emoji ?? null;
     const entry = track(messageId, channelId);
     entry.ownerId = ownerId;
+    const hand = `${game.player.join(',')}|${game.dealer.join(',')}`;
     entry.chain = entry.chain.catch(() => {}).then(async () => {
       if (!entry.started) {
         entry.started = true;
         // Let OwO add 👊 and 🛑 first so the reaction order stays the same.
         if (event === 'create' && initialDelayMs > 0) await sleep(initialDelayMs);
       }
+      const handChanged = entry.hand !== null && entry.hand !== hand;
+      entry.hand = hand;
       entry.want = want;
       await apply(entry, messageId);
+      if (want && handChanged) await clearOwner(entry, messageId);
     }).catch(onError);
     return advice;
   }
@@ -251,9 +270,11 @@ export function createBlackjackHelper({
     const userId = packet?.user_id;
     const messageId = packet?.message_id;
     const emoji = packet?.emoji?.name;
-    if (userId !== owoBotId || !messageId || (emoji !== HIT && emoji !== STAND)) return;
+    if (!messageId || (emoji !== HIT && emoji !== STAND)) return;
     const entry = games.get(messageId);
     if (!entry) return;
+    if (userId && userId === entry.ownerId) { entry.ownerReacted.add(emoji); return; }
+    if (userId !== owoBotId) return;
     entry.chain = entry.chain.catch(() => {}).then(async () => {
       if (!entry.want) return;
       if (emoji === entry.want) {
@@ -274,6 +295,6 @@ export function createBlackjackHelper({
 
 export function blackjackSettingText(on) {
   return on
-    ? `**blackjack 最適手: ON**\nOwO blackjack の進行中、最適でない方のリアクション（${HIT} ヒット / ${STAND} スタンド）を令夭が外し、押せるのを最適手の1つだけにします。カードが増えるたびに選び直します。\n-# 令夭に「メッセージの管理」権限が無いチャンネルでは、最適手に令夭のリアクションを重ねて示します。52枚1デッキ・ディーラーは17以上で停止・同点と両者バーストは引き分け、という公開版OwOのルールで期待値を厳密計算しています。\`gx bj\` でOFF。`
+    ? `**blackjack 最適手: ON**\nOwO blackjack の進行中、最適でない方のリアクション（${HIT} ヒット / ${STAND} スタンド）を令夭が外し、押せるのを最適手の1つだけにします。カードが増えるたびに選び直し、押した後の本人のリアクションも外すので、毎回残っている1つを1回押すだけです。\n-# 令夭に「メッセージの管理」権限が無いチャンネルでは、最適手に令夭のリアクションを重ねて示します。52枚1デッキ・ディーラーは17以上で停止・同点と両者バーストは引き分け、という公開版OwOのルールで期待値を厳密計算しています。\`gx bj\` でOFF。`
     : `**blackjack 最適手: OFF**\n令夭はリアクションに触れません。\`gx bj\` で再びONにできます。`;
 }

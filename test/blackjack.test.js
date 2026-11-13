@@ -94,6 +94,17 @@ test('OwOがまだ付けていなければ、付けた瞬間に外す', async ()
   assert.deepEqual(calls, [['x', HIT, OWO]]);
 });
 
+test('OwOが手を進めたら本人のリアクションを外し、毎回1回押すだけにする', async () => {
+  const { helper, calls } = setup();
+  await helper.setEnabled(USER, true);
+  helper.observe(hand('<a:10cf:3> <a:2hf:4>', '<a:4df:1> <:cardback:2>'), 'create');     // 12 vs 4: hit
+  await helper.pending();
+  helper.observeReaction(reaction(HIT, USER));                                            // player hits
+  helper.observe(hand('<:10c:3> <:2h:4> <a:2sf:5>', '<a:4df:1> <:cardback:2>', { raw: true }), 'update'); // 14 vs 4
+  await helper.pending();
+  assert.deepEqual(calls, [['x', STAND, OWO], ['x', HIT, USER]]);
+});
+
 test('メッセージの管理権限が無ければ最適手に令夭のリアクションを重ねる', async () => {
   const denied = Object.assign(new Error('Missing Permissions'), { status: 403 });
   const { helper, calls } = setup({ removeReaction: async () => { throw denied; } });
