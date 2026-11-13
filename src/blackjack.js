@@ -163,12 +163,16 @@ export function createBlackjackHelper({
 
   const enabled = (userId) => Boolean(userId && state.users[userId]?.blackjackHint?.enabled);
   const autoOn = (userId) => Boolean(enabled(userId) && state.users[userId]?.blackjackHint?.auto);
+  // Left layout: keep both emojis, but always put the better one on the left.
+  const leftOn = (userId) => Boolean(enabled(userId) && state.users[userId]?.blackjackHint?.left);
+  // Plain: on the first decision OwO's reaction is still there, so Reiyo does not add its own on top ("1" instead of "2").
+  const plainOn = (userId) => Boolean(enabled(userId) && state.users[userId]?.blackjackHint?.plain);
 
   function saveHint(userId, change) {
     const result = settings.catch(() => {}).then(async () => {
       const user = state.users[userId] ??= { cooldowns: {}, tickets: null, recent: [] };
       const previous = user.blackjackHint;
-      const next = change({ enabled: false, auto: false, ...previous });
+      const next = change({ enabled: false, auto: false, left: false, plain: false, ...previous });
       user.blackjackHint = next;
       try { await writer.save(state); }
       catch (error) {
@@ -190,13 +194,16 @@ export function createBlackjackHelper({
     return { enabled: auto ? true : hint.enabled, auto };
   });
   const modeOf = (userId) => (autoOn(userId) ? 'auto' : enabled(userId) ? 'on' : 'off');
-  const setMode = (userId, mode) =>
-    saveHint(userId, () => ({ enabled: mode !== 'off', auto: mode === 'auto' })).then(() => mode);
+  const layoutOf = (userId) => (leftOn(userId) ? 'left' : plainOn(userId) ? 'plain' : 'one');
+  const setMode = (userId, mode, layout = 'one') => saveHint(userId, () => ({
+    enabled: mode !== 'off', auto: mode === 'auto',
+    left: mode !== 'off' && layout === 'left', plain: mode !== 'off' && layout === 'plain',
+  })).then(() => mode);
 
   function track(messageId, channelId) {
     let entry = games.get(messageId);
     if (!entry) {
-      entry = { channelId, want: null, own: null, hand: null, ownerHit: false, autoHand: null, chain: Promise.resolve(), started: false };
+      entry = { channelId, want: null, own: null, placed: null, hand: null, ownerHit: false, autoHand: null, chain: Promise.resolve(), started: false };
       games.set(messageId, entry);
       if (games.size > RECENT_LIMIT) games.delete(games.keys().next().value);
     }
@@ -215,6 +222,7 @@ export function createBlackjackHelper({
     }
     if (entry.own === emoji) entry.own = null;
     if (emoji === HIT) entry.ownerHit = false;
+    if (emoji === entry.want) entry.wantCleared = true;
     return true;
   }
 
@@ -233,6 +241,16 @@ export function createBlackjackHelper({
     return true;
   }
 
+  // Left layout: clear both and add the better one first, so it is always the left reaction.
+  async function placeLeft(entry, messageId) {
+    const want = entry.want;
+    if (!await clear(entry, messageId, want) || !await clear(entry, messageId, other(want))) return false;
+    await react(entry.channelId, messageId, want);
+    await react(entry.channelId, messageId, other(want));
+    entry.placed = want;
+    return true;
+  }
+
   async function apply(entry, messageId, handChanged) {
     const want = entry.want;
     if (!want) {
@@ -240,11 +258,19 @@ export function createBlackjackHelper({
       games.delete(messageId);
       return;
     }
+    if (leftOn(entry.ownerId) && canClear) {
+      if (entry.own) { await unreact(entry.channelId, messageId, entry.own); entry.own = null; }
+      if (handChanged && want === HIT && await autoHit(entry, messageId)) return;
+      if (!handChanged && entry.placed === want) return;
+      if (await placeLeft(entry, messageId)) return;
+    }
+    entry.placed = null;
     if (entry.own && entry.own !== want) { await unreact(entry.channelId, messageId, entry.own); entry.own = null; }
     await clear(entry, messageId, other(want));
     if (handChanged && want === HIT && await autoHit(entry, messageId)) return;
     // After a new card, also reset the better emoji so the player's previous click is gone.
     if (handChanged) await clear(entry, messageId, want);
+    else if (plainOn(entry.ownerId) && canClear && !entry.wantCleared) { entry.placed = want; return; }
     if (entry.own !== want) { await react(entry.channelId, messageId, want); entry.own = want; }
   }
 
@@ -273,8 +299,9 @@ export function createBlackjackHelper({
       }
       const handChanged = entry.hand !== null && entry.hand !== hand;
       // Gateway often sends the same edit twice; skip states already applied.
-      if (entry.hand === hand && entry.want === want && entry.own === want) return;
+      if (entry.hand === hand && entry.want === want && (entry.own === want || entry.placed === want)) return;
       entry.hand = hand;
+      if (entry.want !== want) entry.wantCleared = false;
       entry.want = want;
       await apply(entry, messageId, handChanged);
     }).catch(onError);
@@ -295,12 +322,15 @@ export function createBlackjackHelper({
     }
     if (type !== 'add' || packet.user_id !== owoBotId) return;
     entry.chain = entry.chain.catch(() => {}).then(async () => {
-      if (entry.want && emoji !== entry.want) await clear(entry, messageId, emoji);
+      if (!entry.want) return;
+      // A late OwO reaction lands on the right end; re-place both so the better one stays on the left.
+      if (entry.placed && leftOn(entry.ownerId)) await placeLeft(entry, messageId);
+      else if (emoji !== entry.want) await clear(entry, messageId, emoji);
     }).catch(onError);
   }
 
   return {
-    observe, observeReaction, setEnabled, setAuto, setMode, modeOf, enabled,
+    observe, observeReaction, setEnabled, setAuto, setMode, modeOf, layoutOf, enabled,
     pending: () => Promise.all([...games.values()].map((entry) => entry.chain)),
   };
 }
@@ -311,9 +341,12 @@ export const BLACKJACK_MODES = {
   auto: `on に加えて、${HIT} を押した後も次がヒットなら令夭が2回目のヒットを進めます。`,
 };
 
+export const BLACKJACK_LEFT = `並べ方（on / auto の後に付ける）: \`left\` — 最適でない方も消さず、最適手を常に左に並べる（いつも左を押す）／ \`plain\` — 最初の1手で令夭が重ねず「2」にしない（付けなければ既定で重ねる）`;
+
 // Shown for `gx bj` (current mode) and after `gx bj off|on|auto` (changed).
-export function blackjackModeText(mode, changed = false) {
+export function blackjackModeText(mode, changed = false, layout = 'one') {
   const lines = Object.entries(BLACKJACK_MODES)
     .map(([name, text]) => `${name === mode ? '▶' : '・'} \`gx bj ${name}\` — ${text}`);
-  return `**blackjack 最適手: ${mode.toUpperCase()}**${changed ? ' に切り替えました' : ''}\n${lines.join('\n')}\n-# OwO の公開ソースのルール（52枚1デッキ・ディーラーは17以上で停止・同点と両者バーストは引き分け）で期待値を厳密計算。消す・付け直すには令夭に「メッセージの管理」権限が必要で、無いチャンネルでは最適手に令夭のリアクションを重ねるだけです。`;
+  const label = `${mode.toUpperCase()}${mode !== 'off' && layout !== 'one' ? ` ${layout.toUpperCase()}` : ''}`;
+  return `**blackjack 最適手: ${label}**${changed ? ' に切り替えました' : ''}\n${lines.join('\n')}\n${BLACKJACK_LEFT}\n-# OwO の公開ソースのルール（52枚1デッキ・ディーラーは17以上で停止・同点と両者バーストは引き分け）で期待値を厳密計算。消す・付け直すには令夭に「メッセージの管理」権限が必要で、無いチャンネルでは最適手に令夭のリアクションを重ねるだけです。`;
 }

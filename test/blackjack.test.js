@@ -177,7 +177,7 @@ test('gx bj off/on/auto のモード切替と表示', async () => {
   const { helper, state } = setup();
   assert.equal(helper.modeOf(USER), 'off');
   assert.equal(await helper.setMode(USER, 'auto'), 'auto');
-  assert.deepEqual(state.users[USER].blackjackHint, { enabled: true, auto: true });
+  assert.deepEqual(state.users[USER].blackjackHint, { enabled: true, auto: true, left: false, plain: false });
   assert.equal(helper.modeOf(USER), 'auto');
   await helper.setMode(USER, 'on');
   assert.equal(helper.modeOf(USER), 'on');
@@ -187,4 +187,52 @@ test('gx bj off/on/auto のモード切替と表示', async () => {
   assert.match(text, /最適手: ON\*\* に切り替えました/);
   assert.match(text, /▶ `gx bj on`/);
   for (const mode of ['off', 'on', 'auto']) assert.match(text, new RegExp(`gx bj ${mode}`));
+});
+
+test('on left: 両方残して最適手を常に左に並べる', async () => {
+  const { helper, calls } = setup();
+  await helper.setMode(USER, 'on', 'left');
+  assert.equal(helper.layoutOf(USER), 'left');
+  helper.observe(hand('<a:10cf:3> <a:6hf:4>'), 'create');                                  // 16 vs K: hit
+  helper.observe(hand('<a:10cf:3> <a:6hf:4>', undefined, { raw: true }), 'update');            // duplicate edit
+  helper.observe(hand('<:10c:3> <:6h:4> <a:4hf:5>', undefined, { raw: true }), 'update');      // 20: stand
+  await helper.pending();
+  assert.deepEqual(calls, [
+    ['clear', HIT], ['clear', STAND], ['+', HIT], ['+', STAND],
+    ['clear', STAND], ['clear', HIT], ['+', STAND], ['+', HIT],
+  ]);
+  assert.match(blackjackModeText('on', true, 'left'), /最適手: ON LEFT\*\*/);
+});
+
+test('on left: OwOが後から付けたら並べ直す', async () => {
+  const { helper, calls } = setup();
+  await helper.setMode(USER, 'on', 'left');
+  helper.observe(owoMessage(), 'create');           // 18 vs 7: stand
+  await helper.pending();
+  helper.observeReaction(reaction(HIT));
+  await helper.pending();
+  assert.deepEqual(calls.slice(4), [['clear', STAND], ['clear', HIT], ['+', STAND], ['+', HIT]]);
+});
+
+test('auto left: 2回目のヒットは本人の👊を外して進める', async () => {
+  const calls = [];
+  const { helper } = setup({ removeReaction: async (c, m, e, u) => { calls.push(['remove', e, u]); } });
+  await helper.setMode(USER, 'auto', 'left');
+  helper.observe(hand('<a:2cf:3> <a:3hf:4>', '<a:10df:1> <:cardback:2>'), 'create');
+  await helper.pending();
+  helper.observeReaction(reaction(HIT, USER));
+  helper.observe(hand('<:2c:3> <:3h:4> <a:2sf:5>', '<a:10df:1> <:cardback:2>', { raw: true }), 'update');
+  await helper.pending();
+  assert.deepEqual(calls, [['remove', HIT, USER]]);
+});
+
+test('on plain: 最初の1手は令夭が重ねず、カードが増えたら付け直す', async () => {
+  const { helper, calls } = setup();
+  await helper.setMode(USER, 'on', 'plain');
+  assert.equal(helper.layoutOf(USER), 'plain');
+  helper.observe(hand('<a:10cf:3> <a:6hf:4>'), 'create');                                  // 16 vs K: hit
+  helper.observe(hand('<a:10cf:3> <a:6hf:4>', undefined, { raw: true }), 'update');
+  helper.observe(hand('<:10c:3> <:6h:4> <a:2hf:5>', undefined, { raw: true }), 'update');      // 18 vs K: stand
+  await helper.pending();
+  assert.deepEqual(calls, [['clear', STAND], ['clear', HIT], ['clear', STAND], ['+', STAND]]);
 });

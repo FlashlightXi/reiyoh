@@ -187,13 +187,14 @@ client.on('messageCreate', async (message) => {
     const command = normalized.toLowerCase();
     if (!scopeReady || message.guildId !== config.guildId) return;
     if (!message.author.bot && await aiCommands(message, normalized)) return;
-    const blackjackCommand = /^gx (?:bj|blackjack)(?:\s+(off|on|auto)(?:\s+(on|off))?)?$/.exec(command);
+    const blackjackCommand = /^gx (?:bj|blackjack)(?:\s+(off|on|auto)(?:\s+(on|off|left|plain))?)?$/.exec(command);
     if (!message.author.bot && blackjackCommand) {
       try {
         // `gx bj auto off` (older form) means back to plain `on`.
         const mode = blackjackCommand[1] === 'auto' && blackjackCommand[2] === 'off' ? 'on' : blackjackCommand[1];
-        if (mode) await reply(message, blackjackModeText(await blackjack.setMode(message.author.id, mode), true));
-        else await reply(message, blackjackModeText(blackjack.modeOf(message.author.id)));
+        const layout = ['left', 'plain'].includes(blackjackCommand[2]) ? blackjackCommand[2] : 'one';
+        if (mode) await reply(message, blackjackModeText(await blackjack.setMode(message.author.id, mode, layout), true, layout));
+        else await reply(message, blackjackModeText(blackjack.modeOf(message.author.id), false, blackjack.layoutOf(message.author.id)));
       } catch (error) {
         reportError(error);
         await reply(message, '設定を保存できませんでした。切替前の状態のままです。');
