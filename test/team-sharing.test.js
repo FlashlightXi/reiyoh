@@ -21,16 +21,18 @@ function setup(t) {
   const as=(user,channel=C)=>({guildId:G,channelId:channel,author:{id:user}});
   return {store,config,state,replies,saves,handle,as};
 }
-test('他の人の編成は同じチャンネルで表示されたものだけ返す',async t=>{
+test('他の人の編成は収集中の全チャンネルからまとめて返し、対象外チャンネルの記録は出さない',async t=>{
   const x=setup(t);
   x.store.capture(team('444444444444444444',V,'VHERE'),'create',x.config);
   x.store.capture(team('555555555555555555',V,'VELSE',OTHER),'create',x.config);
   x.store.capture(team('666666666666666666',U,'MINE'),'create',x.config);
   assert.equal(await x.handle(x.as(U),`gx team <@${V}>`),true);
   const r=x.replies.pop();
-  assert.match(r,/VHERE/);assert.doesNotMatch(r,/VELSE|MINE/);
+  assert.match(r,/VHERE/);assert.match(r,/VELSE/);assert.doesNotMatch(r,/MINE/);
   await x.handle(x.as(U),`gx team ${V}`);assert.match(x.replies.pop(),/VHERE/);
   await x.handle(x.as(U,OTHER),`gx team <@!${V}>`);assert.match(x.replies.pop(),/VELSE/);
+  x.config.channelIds=[C];
+  await x.handle(x.as(U),`gx team <@${V}>`);assert.doesNotMatch(x.replies.pop(),/VELSE/);
   await x.handle(x.as(U),'gx team list');
   const list=x.replies.pop();assert.match(list,new RegExp(V));assert.match(list,new RegExp(U));
 });
@@ -48,6 +50,6 @@ test('hideした人は他人から見えず、本人とshow後は見える',asyn
 });
 test('収集対象外チャンネルでは他人の編成を返さない',async t=>{
   const x=setup(t);
-  await x.handle({guildId:G,channelId:'799999999999999999',author:{id:U}},`gx team <@${V}>`);
+  await x.handle({guildId:G,channelId:'999999999999999999',author:{id:U}},`gx team <@${V}>`);
   assert.match(x.replies.pop(),/対象外/);
 });

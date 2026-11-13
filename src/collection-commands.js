@@ -7,7 +7,7 @@ export const HELP = `**Reiyo · 情報と相談**
 \`g\` — いつものタイマー
 \`gai 相談内容\` — 手持ちを調べてAIに相談
 \`gx team\` — 編成・装備・出典
-\`gx team @相手\` / \`gx team list\` — 他の人の編成（このチャンネルで表示されたもの）
+\`gx team @相手\` / \`gx team list\` — 他の人の編成（収集中の全チャンネル）
 \`gx team hide\` / \`gx team show\` — 自分の編成を他の人に見せるか切替
 \`gx pets\` — 観測したペット情報
 \`gx boss\` / \`gx boss logs\` — 最新ボス・本人の詳細ログ
@@ -118,21 +118,21 @@ export function createCollectionCommands({ config, state, writer, store, bosses,
         const hide = lower.endsWith(' hide');
         await saveSettings(() => { const now = (state.teamHidden ?? []).filter(id => id !== message.author.id); state.teamHidden = hide ? [...now, message.author.id] : now; });
         await reply(message, hide ? '他の人が `gx team @あなた` や `gx team list` であなたの編成を見られないようにしました。`gx team show` で戻せます。'
-          : '他の人が、このチャンネルで表示されたあなたの編成を `gx team @あなた` で見られるようにしました。`gx team hide` で隠せます。');
+          : '他の人が、収集中のチャンネルで表示されたあなたの編成を `gx team @あなた` で見られるようにしました。`gx team hide` で隠せます。');
         return true;
       }
       if (lower === 'gx team list') {
-        const owners = store.teamOwners(message.guildId, message.channelId).filter(r => !hidden.has(r.userId) || r.userId === message.author.id);
-        await reply(message, `**Reiyo · このチャンネルで編成を表示した人**\n${owners.map(r => `<@${r.userId}> · ${r.panels}件 · <t:${Math.floor(new Date(r.lastSeen).getTime()/1000)}:R>`).join('\n') || 'まだいません。'}\n\`gx team @相手\` で編成を確認できます。隠したい人は \`gx team hide\`。`);
+        const owners = store.teamOwners(message.guildId, config.channelIds).filter(r => !hidden.has(r.userId) || r.userId === message.author.id);
+        await reply(message, `**Reiyo · 編成の記録がある人（収集中の全チャンネル）**\n${owners.map(r => `<@${r.userId}> · ${r.panels}件 · <t:${Math.floor(new Date(r.lastSeen).getTime()/1000)}:R>`).join('\n') || 'まだいません。'}\n\`gx team @相手\` で編成を確認できます。隠したい人は \`gx team hide\`。`);
         return true;
       }
       const target = teamMatch[1] ?? teamMatch[2];
-      // Only this channel's panels: they were already posted here, so nothing from other channels is disclosed.
+      // Panels from every collected channel (owner opted for server-wide sharing); hidden players are excluded.
       if (target !== message.author.id && hidden.has(target)) { await reply(message, 'この人は編成を非公開にしています。'); return true; }
       const tools=createAdvisorTools({dbPath:path.join(path.dirname(config.statePath),'observations.sqlite'),
-        guildId:message.guildId,userId:target,channelIds:[message.channelId],includePersonalKnowledge:false});
+        guildId:message.guildId,userId:target,channelIds:config.channelIds,includePersonalKnowledge:false});
       try {
-        await reply(message, `**<@${target}> の編成（このチャンネル）**\n` + teamText(tools.invoke('get_formation_history'), 'このチャンネルにこの人のteam表示の記録がまだありません。'));
+        await reply(message, `**<@${target}> の編成（収集中の全チャンネル）**\n` + teamText(tools.invoke('get_formation_history'), '収集中のチャンネルにこの人のteam表示の記録がまだありません。'));
       } finally { tools.close(); }
       return true;
     }

@@ -177,11 +177,12 @@ export function openObservations(filePath) {
         return {...r,kind:resolved,storedKind:r.kind,snapshot,payload:JSON.parse(r.payload),facts:observedFacts(snapshot,resolved)};})
         .filter(r=>!kind||r.kind===kind).slice(-limit);
     },
-    // Players whose team panels were displayed in this channel; ownership must come from the panel, not a guess.
-    teamOwners(guild, channel, limit = 25) {
+    // Players whose team panels were displayed in the given channels; ownership must come from the panel, not a guess.
+    teamOwners(guild, channels, limit = 25) {
+      if (!channels.length) return [];
       return db.prepare(`SELECT subject_id AS userId, COUNT(DISTINCT message_id) AS panels, MAX(source_at) AS lastSeen FROM observations
-        WHERE guild_id=? AND channel_id=? AND source='owo' AND kind='team' AND subject_id IS NOT NULL AND ownership!='conflict'
-        GROUP BY subject_id ORDER BY lastSeen DESC LIMIT ?`).all(guild,channel,limit);
+        WHERE guild_id=? AND channel_id IN (${channels.map(() => '?').join(',')}) AND source='owo' AND kind='team' AND subject_id IS NOT NULL AND ownership!='conflict'
+        GROUP BY subject_id ORDER BY lastSeen DESC LIMIT ?`).all(guild,...channels,limit);
     },
     history(guild, channel, messageId) {
       return db.prepare('SELECT * FROM observations WHERE guild_id=? AND channel_id=? AND message_id=? ORDER BY seq DESC LIMIT 100')
