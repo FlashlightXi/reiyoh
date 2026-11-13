@@ -141,14 +141,22 @@ export function adviseBlackjack(game) {
 }
 
 const RECENT_LIMIT = 200;
+const other = (emoji) => (emoji === HIT ? STAND : HIT);
+const statusOf = (error) => error?.status ?? error?.httpStatus ?? error?.code;
 
+// Leaves only the better choice on OwO's message:
+// - removes OwO's reaction for the worse choice (needs Manage Messages; the player's own reactions are never touched),
+// - re-adds the better choice as Reiyo's reaction when OwO's one was removed earlier, so it stays clickable.
+// OwO's collector only checks which emoji the player adds, so who added the reaction first does not matter.
+// Without Manage Messages it falls back to marking the better choice with Reiyo's own reaction.
 export function createBlackjackHelper({
-  state, writer, owoBotId, react, unreact, resolveOwner = () => null,
+  state, writer, owoBotId, react, unreact, removeReaction, resolveOwner = () => null,
   onError = () => {}, initialDelayMs = 1500, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
   state.users ??= {};
-  const games = new Map(); // messageId -> { emoji, chain }
+  const games = new Map(); // messageId -> per-game reaction state
   let settings = Promise.resolve();
+  let canPrune = typeof removeReaction === 'function';
 
   const enabled = (userId) => Boolean(userId && state.users[userId]?.blackjackHint?.enabled);
 
@@ -171,14 +179,43 @@ export function createBlackjackHelper({
     return result;
   }
 
-  function track(messageId) {
+  function track(messageId, channelId) {
     let entry = games.get(messageId);
     if (!entry) {
-      entry = { emoji: null, chain: Promise.resolve(), started: false };
+      entry = { channelId, want: null, own: null, removed: new Set(), chain: Promise.resolve(), started: false };
       games.set(messageId, entry);
       if (games.size > RECENT_LIMIT) games.delete(games.keys().next().value);
     }
     return entry;
+  }
+
+  // Remove OwO's reaction; false when it is not there (yet) or the permission is missing.
+  async function pruneOwo(entry, messageId, emoji) {
+    if (!canPrune || entry.removed.has(emoji)) return entry.removed.has(emoji);
+    try {
+      await removeReaction(entry.channelId, messageId, emoji, owoBotId);
+      entry.removed.add(emoji);
+      return true;
+    } catch (error) {
+      const status = statusOf(error);
+      if (status === 403 || status === 50013) { canPrune = false; return false; }
+      if (status === 404 || status === 10014) return false; // OwO has not added it yet; the reaction event handles it.
+      throw error;
+    }
+  }
+
+  async function apply(entry, messageId) {
+    const want = entry.want;
+    if (!want) {
+      if (entry.own) { await unreact(entry.channelId, messageId, entry.own); entry.own = null; }
+      games.delete(messageId);
+      return;
+    }
+    if (entry.own && entry.own !== want) { await unreact(entry.channelId, messageId, entry.own); entry.own = null; }
+    await pruneOwo(entry, messageId, other(want));
+    // Keep the better choice clickable: add it ourselves when OwO's is gone, or as a marker without the permission.
+    const needOwn = entry.removed.has(want) || !canPrune;
+    if (needOwn && entry.own !== want) { await react(entry.channelId, messageId, want); entry.own = want; }
   }
 
   // event: 'create' for the first send, 'update' for edits (hit, stand, resume).
@@ -192,10 +229,10 @@ export function createBlackjackHelper({
     if (!messageId || !channelId) return null;
     const tracked = games.get(messageId);
     const ownerId = game.ownerId ?? tracked?.ownerId ?? resolveOwner(game.username, message);
-    if (!enabled(ownerId) && !tracked?.emoji) return null;
+    if (!enabled(ownerId) && !tracked) return null;
     const advice = enabled(ownerId) ? adviseBlackjack(game) : null;
     const want = advice?.emoji ?? null;
-    const entry = track(messageId);
+    const entry = track(messageId, channelId);
     entry.ownerId = ownerId;
     entry.chain = entry.chain.catch(() => {}).then(async () => {
       if (!entry.started) {
@@ -203,19 +240,40 @@ export function createBlackjackHelper({
         // Let OwO add 👊 and 🛑 first so the reaction order stays the same.
         if (event === 'create' && initialDelayMs > 0) await sleep(initialDelayMs);
       }
-      if (entry.emoji === want) { if (!want) games.delete(messageId); return; }
-      if (entry.emoji) { await unreact(channelId, messageId, entry.emoji); entry.emoji = null; }
-      if (want) { await react(channelId, messageId, want); entry.emoji = want; }
-      if (!want) games.delete(messageId);
+      entry.want = want;
+      await apply(entry, messageId);
     }).catch(onError);
     return advice;
   }
 
-  return { observe, setEnabled, enabled, pending: () => Promise.all([...games.values()].map((entry) => entry.chain)) };
+  // Raw MESSAGE_REACTION_ADD: OwO adding the worse choice after we decided is removed right away.
+  function observeReaction(packet) {
+    const userId = packet?.user_id;
+    const messageId = packet?.message_id;
+    const emoji = packet?.emoji?.name;
+    if (userId !== owoBotId || !messageId || (emoji !== HIT && emoji !== STAND)) return;
+    const entry = games.get(messageId);
+    if (!entry) return;
+    entry.chain = entry.chain.catch(() => {}).then(async () => {
+      if (!entry.want) return;
+      if (emoji === entry.want) {
+        entry.removed.delete(emoji);
+        if (entry.own === emoji && canPrune) { await unreact(entry.channelId, messageId, emoji); entry.own = null; }
+        return;
+      }
+      entry.removed.delete(emoji);
+      await pruneOwo(entry, messageId, emoji);
+    }).catch(onError);
+  }
+
+  return {
+    observe, observeReaction, setEnabled, enabled,
+    pending: () => Promise.all([...games.values()].map((entry) => entry.chain)),
+  };
 }
 
 export function blackjackSettingText(on) {
   return on
-    ? `**blackjack 最適手リアクション: ON**\nOwO blackjack の進行中、令夭が最適手と同じリアクション（${HIT} ヒット / ${STAND} スタンド）を付け、カードが増えるたびに付け替えます。決着したら外します。\n-# 52枚1デッキ・ディーラーは17以上で停止・同点と両者バーストは引き分け、という公開版OwOのルールで期待値を厳密計算しています。\`gx bj\` でOFF。`
-    : `**blackjack 最適手リアクション: OFF**\n令夭はリアクションを付けません。\`gx bj\` で再びONにできます。`;
+    ? `**blackjack 最適手: ON**\nOwO blackjack の進行中、最適でない方のリアクション（${HIT} ヒット / ${STAND} スタンド）を令夭が外し、押せるのを最適手の1つだけにします。カードが増えるたびに選び直します。\n-# 令夭に「メッセージの管理」権限が無いチャンネルでは、最適手に令夭のリアクションを重ねて示します。52枚1デッキ・ディーラーは17以上で停止・同点と両者バーストは引き分け、という公開版OwOのルールで期待値を厳密計算しています。\`gx bj\` でOFF。`
+    : `**blackjack 最適手: OFF**\n令夭はリアクションに触れません。\`gx bj\` で再びONにできます。`;
 }
