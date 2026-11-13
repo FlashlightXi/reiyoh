@@ -35,11 +35,13 @@ const client = new Client({ intents: [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.MessageContent,
+  GatewayIntentBits.GuildMessageReactions,
 ], partials: [Partials.Message] });
 const blackjack = createBlackjackHelper({
   state, writer, owoBotId: config.owoBotId, onError: reportError,
   react: (channelId, messageId, emoji) => client.rest.put(Routes.channelMessageOwnReaction(channelId, messageId, encodeURIComponent(emoji))),
   unreact: (channelId, messageId, emoji) => client.rest.delete(Routes.channelMessageOwnReaction(channelId, messageId, encodeURIComponent(emoji))),
+  removeReaction: (channelId, messageId, emoji, userId) => client.rest.delete(Routes.channelMessageUserReaction(channelId, messageId, encodeURIComponent(emoji), userId)),
   // Default avatars carry no user ID; fall back to a cached member with the exact username.
   resolveOwner: (username, message) => client.guilds.cache.get(message.guildId ?? message.guild_id)
     ?.members.cache.find((member) => member.user.username === username)?.id ?? null,
@@ -142,6 +144,10 @@ client.on('guildCreate', (guild) => { if (scopeReady && guild.id === config.guil
 
 // Raw Gateway edits preserve intermediate states without fetching each message via REST.
 client.on('raw', (packet) => {
+  if (scopeReady && packet.t === 'MESSAGE_REACTION_ADD') {
+    try { blackjack.observeReaction(packet.d); } catch (error) { reportError(error); }
+    return;
+  }
   if (!scopeReady || packet.t !== 'MESSAGE_UPDATE') return;
   try { observations.capture(packet.d, 'update', config); } catch (error) { reportError(error); }
   if (packet.d?.guild_id === config.guildId && config.channelIds.includes(packet.d.channel_id)) {

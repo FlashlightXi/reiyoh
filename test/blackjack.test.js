@@ -46,41 +46,84 @@ function setup(overrides = {}) {
   const state = { users: {} };
   const helper = createBlackjackHelper({
     state, writer: { save: async () => {} }, owoBotId: OWO, initialDelayMs: 0,
-    react: async (c, m, e) => { calls.push(['+', m, e]); },
-    unreact: async (c, m, e) => { calls.push(['-', m, e]); },
+    react: async (c, m, e) => { calls.push(['+', e]); },
+    unreact: async (c, m, e) => { calls.push(['-', e]); },
+    removeReaction: async (c, m, e, u) => { calls.push(['x', e, u]); },
     onError: (error) => { throw error; }, ...overrides,
   });
   return { helper, calls, state };
 }
+const hand = (player, dealer = '<a:kdf:1> <:cardback:2>', extra = {}) => owoMessage({ player, dealer, ...extra });
+const reaction = (emoji, user = OWO) => ({ user_id: user, message_id: 'm1', channel_id: 'c1', emoji: { name: emoji } });
 
-test('OFFの人のゲームにはリアクションしない', async () => {
+test('OFFの人のゲームには触れない', async () => {
   const { helper, calls } = setup();
   helper.observe(owoMessage(), 'create');
+  helper.observeReaction(reaction(HIT));
   await helper.pending();
   assert.deepEqual(calls, []);
 });
 
-test('ONなら最適手を付け、手が変わったら付け替え、決着で外す', async () => {
+test('ONならOwOの不利な方を外し、最適手が入れ替わったら令夭が付け直す', async () => {
   const { helper, calls, state } = setup();
   assert.equal(await helper.setEnabled(USER), true);
   assert.equal(state.users[USER].blackjackHint.enabled, true);
-  helper.observe(owoMessage({ player: '<a:10cf:3> <a:6hf:4>', dealer: '<a:kdf:1> <:cardback:2>' }), 'create');
-  helper.observe(owoMessage({ player: '<a:10cf:3> <a:6hf:4>', dealer: '<a:kdf:1> <:cardback:2>', raw: true }), 'update');
-  helper.observe(owoMessage({ player: '<:10c:3> <:6h:4> <a:4hf:5>', dealer: '<a:kdf:1> <:cardback:2>', raw: true }), 'update');
-  helper.observe(owoMessage({ player: '<:10c:3> <:6h:4> <:4h:5>', dealer: '<:kd:1> <a:8df:2>', footer: '🎲 ~ You won 250,000', raw: true }), 'update');
+  helper.observe(hand('<a:10cf:3> <a:6hf:4>'), 'create');                       // 16 vs K: hit
+  helper.observe(hand('<a:10cf:3> <a:6hf:4>', undefined, { raw: true }), 'update');
+  helper.observe(hand('<:10c:3> <:6h:4> <a:4hf:5>', undefined, { raw: true }), 'update'); // 20: stand
+  helper.observe(hand('<:10c:3> <:6h:4> <:4h:5>', '<:kd:1> <a:8df:2>', { footer: '🎲 ~ You won 250,000', raw: true }), 'update');
   await helper.pending();
-  assert.deepEqual(calls, [['+', 'm1', HIT], ['-', 'm1', HIT], ['+', 'm1', STAND], ['-', 'm1', STAND]]);
+  assert.deepEqual(calls, [['x', STAND, OWO], ['x', HIT, OWO], ['+', STAND], ['-', STAND]]);
 });
 
-test('途中でOFFにすると付けたリアクションを外す', async () => {
+test('OwOがまだ付けていなければ、付けた瞬間に外す', async () => {
+  const notYet = Object.assign(new Error('Unknown Emoji'), { status: 404 });
+  const calls = [];
+  let first = true;
+  const { helper } = setup({ removeReaction: async (c, m, e, u) => {
+    if (first) { first = false; throw notYet; }
+    calls.push(['x', e, u]);
+  } });
+  await helper.setEnabled(USER, true);
+  helper.observe(owoMessage(), 'create');           // 18 vs 7: stand -> remove 👊 (not there yet)
+  await helper.pending();
+  helper.observeReaction(reaction(STAND));
+  helper.observeReaction(reaction(HIT, USER));     // player's own reactions are ignored
+  helper.observeReaction(reaction(HIT));
+  await helper.pending();
+  assert.deepEqual(calls, [['x', HIT, OWO]]);
+});
+
+test('OwOが手を進めたら本人のリアクションを外し、毎回1回押すだけにする', async () => {
   const { helper, calls } = setup();
+  await helper.setEnabled(USER, true);
+  helper.observe(hand('<a:10cf:3> <a:2hf:4>', '<a:4df:1> <:cardback:2>'), 'create');     // 12 vs 4: hit
+  await helper.pending();
+  helper.observeReaction(reaction(HIT, USER));                                            // player hits
+  helper.observe(hand('<:10c:3> <:2h:4> <a:2sf:5>', '<a:4df:1> <:cardback:2>', { raw: true }), 'update'); // 14 vs 4
+  await helper.pending();
+  assert.deepEqual(calls, [['x', STAND, OWO], ['x', HIT, USER]]);
+});
+
+test('メッセージの管理権限が無ければ最適手に令夭のリアクションを重ねる', async () => {
+  const denied = Object.assign(new Error('Missing Permissions'), { status: 403 });
+  const { helper, calls } = setup({ removeReaction: async () => { throw denied; } });
   await helper.setEnabled(USER, true);
   helper.observe(owoMessage(), 'create');
   await helper.pending();
-  await helper.setEnabled(USER, false);
-  helper.observe(owoMessage({ raw: true }), 'update');
+  assert.deepEqual(calls, [['+', STAND]]);
+});
+
+test('途中でOFFにすると令夭のリアクションを外して手を引く', async () => {
+  const { helper, calls } = setup();
+  await helper.setEnabled(USER, true);
+  helper.observe(hand('<a:10cf:3> <a:6hf:4>'), 'create');
+  helper.observe(hand('<:10c:3> <:6h:4> <a:4hf:5>', undefined, { raw: true }), 'update');
   await helper.pending();
-  assert.deepEqual(calls, [['+', 'm1', STAND], ['-', 'm1', STAND]]);
+  await helper.setEnabled(USER, false);
+  helper.observe(hand('<:10c:3> <:6h:4> <a:4hf:5>', undefined, { raw: true }), 'update');
+  await helper.pending();
+  assert.deepEqual(calls.at(-1), ['-', STAND]);
 });
 
 test('既定アバターでは名前から本人を解決する', async () => {
