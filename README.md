@@ -6,6 +6,7 @@ OwOの観測記録を使う、自己ホスト型Discordヘルパー。収集・�
 
 - 指定した1サーバー・複数チャンネルでOwOと登録済み補助Botの返信・編集履歴をSQLiteへ保存
 - `g`：タイマー、`gx team / pets / battle`：編成・ペット・戦績、本人用ページボタン
+- `gx battle` とAI相談で連勝を表示。OwOの表示値を優先し、観測した連続勝利だけの値は下限として区別
 - `gai 質問`：OpenRouter経由のツール付き相談。回答への返信で会話を継続
 - Components V2で取得状況、入出力トークン、キャッシュ実績、応答時間を表示
 - 外部の知識カード・指示文・計算ツールを任意追加
@@ -63,6 +64,12 @@ npm run check:public
 テストは架空のID・データを使い、DiscordやOpenRouterへの接続を行いません。`check:public` はGit管理対象を許可リストで確認します。`.env`、`data/`、`docs/`、`knowledge/`、`private/`、ローカル作業記録は公開対象から除外しています。
 
 MIT License。OwO/Discord/NeonUtilとは独立した非公式プロジェクトです。各サービスの利用条件・API制限に従って運用してください。
+
+## 連勝とコマンドの集計
+
+連勝は戦闘フッターの `Streak:` とteam表示の `Current Streak / Highest Streak` を根拠にします。表示値がある場合は `reported`、表示値にその後の観測勝利を足した値は `estimated`、このチャンネルで観測した連続勝利だけの値は `observed-lower-bound` として返し、実際の連勝がそれ以上になり得ることを示します。連勝が切れた時の長さ、勝率、観測したXPとボーナスXPも同じ集計に含めます。ボス戦の返信は通常戦の勝敗と連勝から分けます。
+
+AIの `get_command_usage` は、本人が同チャンネルで入力したOwOコマンドを接頭辞・別名・引数の形ごとに数え、OwOの返信種別（待機、エラーなど）を添えます。引数は `<id>` `<n>` `<user>` `<arg>` に置き換えて返します。
 
 ## ボス記録
 

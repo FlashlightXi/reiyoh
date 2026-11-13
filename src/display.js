@@ -15,11 +15,18 @@ export function pageButtons(kind,ownerId,page,pages){return {type:1,components:[
  {type:2,style:2,label:`${page} / ${pages}`,custom_id:`${kind}:${ownerId}:page:${page}`,disabled:true},
  {type:2,style:2,label:'次へ',custom_id:`${kind}:${ownerId}:next:${Math.min(pages,page+1)}`,disabled:page>=pages}
 ]};}
+const basisLabel={reported:'OwO表示',estimated:'表示値+観測勝利',['observed-lower-bound']:'観測のみ・実際はこれ以上'};
+function streakLine(s){
+ if(!s)return '';
+ const part=(label,x)=>`${label} \`${String(x.value).padStart(3,' ')}\`（${basisLabel[x.basis]??'未確認'}）`;
+ const largest=s.breaks?.largest;
+ return `\n-# ${part('連勝',s.current)} • ${part('最高',s.highest)}${largest?` • 切れた連勝の最大 \`${String(largest.streak).padStart(3,' ')}\`（${s.breaks.count}回）`:''}`;
+}
 export function battlePayload(b,page=1,ownerId){
  const pages=Math.max(1,Math.min(10,Math.ceil(b.recent.length/10)));page=Math.min(Math.max(1,page),pages);
  const count=n=>`\`${String(n).padStart(3,' ')}\``;
  const rows=b.recent.slice((page-1)*10,page*10).map((r,i)=>`${(page-1)*10+i+1}. ${icon(({won:'won',lost:'lost',tie:'tie'})[r.outcome]??'pending')} ${count(r.turns??'?')} • [メッセージ](${r.source.url}) • ${richTime(r.source.sourceAt)}`);
- const blocks=[textBlock(rows.join('\n')||'戦闘の記録を待っています。'),separator(),textBlock(`${icon('won')} ${count(b.counts.won)}　${icon('lost')} ${count(b.counts.lost)}　${icon('tie')} ${count(b.counts.tie)} • 記録 ${count(b.total??b.recent.length)}戦${b.truncated?' • 取得範囲に上限あり':''}`)];
+ const blocks=[textBlock(rows.join('\n')||'戦闘の記録を待っています。'),separator(),textBlock(`${icon('won')} ${count(b.counts.won)}　${icon('lost')} ${count(b.counts.lost)}　${icon('tie')} ${count(b.counts.tie)} • 記録 ${count(b.total??b.recent.length)}戦${b.truncated?' • 取得範囲に上限あり':''}${streakLine(b.streak)}`)];
  if(ownerId)blocks.push(pageButtons('battle',ownerId,page,pages));
  return cardPayload(blocks);
 }
