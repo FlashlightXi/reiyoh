@@ -104,7 +104,7 @@ async function saveResponseRecords(message, result) {
 
 const slashG = new SlashCommandBuilder().setName('g').setDescription('Reiyo の操作')
   .addSubcommand((command) => command.setName('x').setDescription('カウントダウン絵文字を一覧表示'))
-  .addSubcommand((command) => command.setName('video').setDescription('説明動画を表示')
+  .addSubcommand((command) => command.setName('video').setDescription('パッシブ・武器・編成の効果と説明動画を表示')
     .addStringOption((option) => option.setName('name').setDescription('passive・weapon・チーム編成の名前').setRequired(true).setAutocomplete(true))
     .addBooleanOption((option) => option.setName('public').setDescription('チャンネルの全員に表示する（既定は自分だけ）')));
 

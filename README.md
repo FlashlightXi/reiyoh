@@ -48,20 +48,22 @@ Developer PortalでMessage Content Intentを有効にし、対象チャンネル
 
 運用者用CLI：`npm run advisor -- GUILD_ID USER_ID CHANNEL_ID "相談文"`。対象範囲を指定できるため、運用者自身が権限を確認して使用します。
 
-## 説明動画
+## 図鑑と説明動画
 
-`REIYOH_VIDEOS_FILE` に動画一覧のJSONを指定すると、`gx v 名前` で動画を添付して返します。`gx v` だけなら種類ごとの一覧とメニューを表示し、メニューで選んだ動画は選んだ本人にだけ表示されます。`/g video` は名前の入力補完つきで、既定は本人だけに表示します（`public` で全員に表示）。
+`REIYOH_VIDEOS_FILE` に図鑑のJSONを指定すると、`gx v 名前`（`gx wiki` も可）で効果・品質ごとの値・説明動画を表示します。動画のある項目は添付して再生でき、ない項目は文字だけを表示します。`gx v` だけなら種類ごとの一覧とメニューを表示し、メニューで選んだ項目は選んだ本人にだけ表示されます。`/g video` は名前の入力補完つきで、既定は本人だけに表示します（`public` で全員に表示）。
 
 ```json
 {
+  "attribution": "出典の表記",
   "kinds": {"passive": {"label": "PASSIVE", "color": "#3B4FD8"}},
   "videos": [
-    {"kind": "passive", "id": "lifesteal", "name": "Lifesteal", "aliases": ["ls"], "file": "passive/lifesteal.mp4", "summary": "与ダメージの一部を回復"}
+    {"kind": "passive", "id": "lifesteal", "name": "Lifesteal", "aliases": ["ls"], "file": "passive/lifesteal.mp4",
+     "summary": "一言の説明", "effect": "効果の本文（Markdown可）", "facts": ["品質 0→100: 15% → 35%"]}
   ]
 }
 ```
 
-`file` は一覧JSONのあるフォルダからの相対パスで、その外は読みません。名前は `id`・`name`・`aliases` の完全一致、前方一致、部分一致の順で探します。添付の上限は10MBです。一覧JSONは更新時刻を見て読み直すため、差し替えに再起動は不要です。動画そのものはリポジトリに含めません。
+`file` は省略でき、指定する場合は図鑑JSONのあるフォルダからの相対パスで、その外は読みません。名前は `id`・`name`・`aliases` の完全一致、前方一致、部分一致の順で探します。添付の上限は10MBで、超える動画は添付せず注記します。図鑑JSONは更新時刻を見て読み直すため、差し替えに再起動は不要です。動画や資料そのものはリポジトリに含めません。
 
 ## データとAIの扱い
 

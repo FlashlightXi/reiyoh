@@ -2,8 +2,9 @@ import {readFileSync, statSync} from 'node:fs';
 import path from 'node:path';
 import {textBlock, separator} from './display.js';
 
-// Explainer videos live outside this repository. REIYOH_VIDEOS_FILE points to a JSON catalog;
-// each entry's file is resolved inside the catalog's directory and attached as-is.
+// A lookup catalog (passives, weapons, teams…) with optional explainer videos, kept outside this
+// repository. REIYOH_VIDEOS_FILE points to the JSON; each entry's video file is resolved inside the
+// catalog's directory and attached as-is. Entries without a video still show their details.
 export const UPLOAD_LIMIT = 10 * 1024 * 1024;
 const MAX_OPTIONS = 25;
 
@@ -16,21 +17,26 @@ export function loadVideoCatalog(file) {
   const seen = new Set();
   const videos = [];
   for (const v of raw.videos ?? []) {
-    if (!v?.id || !v?.name || !v?.file || !v?.kind) continue;
+    if (!v?.id || !v?.name || !v?.kind) continue;
     const key = `${v.kind}:${v.id}`;
     if (seen.has(key)) continue;
-    const full = path.resolve(root, v.file);
-    if (path.relative(root, full).startsWith('..') || path.isAbsolute(path.relative(root, full))) continue;
+    let full = null;
+    if (v.file) {
+      full = path.resolve(root, String(v.file));
+      const rel = path.relative(root, full);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    }
     seen.add(key);
     videos.push({
       kind: String(v.kind), id: String(v.id), name: String(v.name),
       aliases: (v.aliases ?? []).map(String), summary: v.summary ? String(v.summary) : '',
+      effect: v.effect ? String(v.effect) : '', facts: (v.facts ?? []).map(String),
       file: full, key,
       keys: [...new Set([v.id, v.name, ...(v.aliases ?? [])].map(normalizeKey).filter(Boolean))],
     });
   }
   const order = [...new Set([...Object.keys(kinds), ...videos.map((v) => v.kind)])];
-  return {kinds, order, videos};
+  return {kinds, order, videos, attribution: raw.attribution ? String(raw.attribution) : ''};
 }
 
 // Cache by mtime so replacing the catalog takes effect without a restart.
@@ -62,22 +68,26 @@ const kindColor = (catalog, kind) => {
 
 export function attachmentName(video) {
   const base = normalizeKey(`${video.kind}-${video.id}`) || 'video';
-  return `${base}${path.extname(video.file).toLowerCase() || '.mp4'}`;
+  return `${base}${path.extname(video.file ?? '').toLowerCase() || '.mp4'}`;
 }
 
-export function videoPayload(catalog, video) {
+// Card with the entry's details; the video is attached only when the file exists and fits.
+export function videoPayload(catalog, video, limit = UPLOAD_LIMIT) {
+  const problem = video.file ? checkSize(video, limit) : null;
+  const attach = video.file && !problem;
   const name = attachmentName(video);
-  const blocks = [
-    textBlock(`**${video.name}** · ${kindLabel(catalog, video.kind)}`),
-    {type: 12, items: [{media: {url: `attachment://${name}`}, description: video.name.slice(0, 1024)}]},
-  ];
-  if (video.summary) blocks.push(textBlock(video.summary.slice(0, 1800)));
+  const blocks = [textBlock(`**${video.name}** · ${kindLabel(catalog, video.kind)}${video.aliases.length ? `\n-# ${video.aliases.join(' · ')}` : ''}`)];
+  if (attach) blocks.push({type: 12, items: [{media: {url: `attachment://${name}`}, description: video.name.slice(0, 1024)}]});
+  const body = [video.summary, video.effect, video.facts.map((f) => `• ${f}`).join('\n')].filter(Boolean).join('\n\n');
+  if (body) blocks.push(textBlock(body.slice(0, 3000)));
+  const notes = [!video.file ? '説明動画は準備中です。' : problem, catalog.attribution].filter(Boolean);
+  if (notes.length) blocks.push(textBlock(notes.map((n) => `-# ${n}`).join('\n').slice(0, 600)));
   const container = {type: 17, components: blocks};
   const accent = kindColor(catalog, video.kind);
   if (accent !== undefined) container.accent_color = accent;
   return {
     flags: 32768, components: [container],
-    files: [{attachment: video.file, name}],
+    ...(attach ? {files: [{attachment: video.file, name}]} : {}),
     allowedMentions: {parse: [], repliedUser: false},
   };
 }
@@ -85,14 +95,14 @@ export function videoPayload(catalog, video) {
 function selectRow(customId, placeholder, videos) {
   return {type: 1, components: [{
     type: 3, custom_id: customId, placeholder: placeholder.slice(0, 150),
-    options: videos.slice(0, MAX_OPTIONS).map((v) => ({label: v.name.slice(0, 100), value: v.key.slice(0, 100),
+    options: videos.slice(0, MAX_OPTIONS).map((v) => ({label: `${v.file ? '▶ ' : ''}${v.name}`.slice(0, 100), value: v.key.slice(0, 100),
       description: v.aliases.length ? v.aliases.join(', ').slice(0, 100) : undefined})),
   }]};
 }
 
 // Menus are usable by anyone; selections are answered privately to avoid channel spam.
 export function listPayload(catalog) {
-  const blocks = [textBlock('**説明動画**\n`gx v 名前` で動画を表示します。下のメニューから選ぶと、自分だけに表示されます。')];
+  const blocks = [textBlock('**図鑑**\n`gx v 名前` で効果と説明動画（▶ 付き）を表示します。下のメニューから選ぶと、自分だけに表示されます。')];
   for (const kind of catalog.order) {
     const videos = catalog.videos.filter((v) => v.kind === kind);
     if (!videos.length) continue;
@@ -104,7 +114,7 @@ export function listPayload(catalog) {
       blocks.push(selectRow(`video:list:${normalizeKey(kind).slice(0, 40)}:${page}`, `${kindLabel(catalog, kind)}${range}を選ぶ`, chunk));
     }
   }
-  if (blocks.length === 1) blocks.push(textBlock('動画はまだ登録されていません。'));
+  if (blocks.length === 1) blocks.push(textBlock('項目はまだ登録されていません。'));
   return {flags: 32768, components: [{type: 17, components: blocks}], allowedMentions: {parse: [], repliedUser: false}};
 }
 
@@ -117,7 +127,7 @@ export function choicesPayload(catalog, query, matches) {
 
 export function autocompleteChoices(catalog, query) {
   const list = normalizeKey(query) ? findVideos(catalog, query) : catalog.videos;
-  return list.slice(0, MAX_OPTIONS).map((v) => ({name: `${v.name} · ${kindLabel(catalog, v.kind)}`.slice(0, 100), value: v.key.slice(0, 100)}));
+  return list.slice(0, MAX_OPTIONS).map((v) => ({name: `${v.file ? '▶ ' : ''}${v.name} · ${kindLabel(catalog, v.kind)}`.slice(0, 100), value: v.key.slice(0, 100)}));
 }
 
 export function byKey(catalog, key) { return catalog.videos.find((v) => v.key === key); }
@@ -125,28 +135,26 @@ export function byKey(catalog, key) { return catalog.videos.find((v) => v.key ==
 export function checkSize(video, limit = UPLOAD_LIMIT) {
   try {
     const size = statSync(video.file).size;
-    if (size > limit) return `動画のサイズが大きすぎて添付できません（${(size / 1048576).toFixed(1)} MB）。`;
+    if (size > limit) return `説明動画が大きすぎて添付できません（${(size / 1048576).toFixed(1)} MB）。`;
     return null;
-  } catch { return '動画ファイルが見つかりません。管理者に連絡してください。'; }
+  } catch { return '説明動画のファイルが見つかりません。'; }
 }
 
-const NOT_CONFIGURED = '説明動画はこのサーバーでは設定されていません。';
+const NOT_CONFIGURED = '図鑑はこのサーバーでは設定されていません。';
 
 export function createVideoCommands({readCatalog, reply, onError = () => {}}) {
   const catalog = () => { try { return readCatalog(); } catch (error) { onError(error); return null; } };
 
   async function message(msg, normalized) {
-    const match = normalized.match(/^gx\s+(?:v|video)(?:\s+([\s\S]*))?$/i);
+    const match = normalized.match(/^gx\s+(?:v|video|wiki)(?:\s+([\s\S]*))?$/i);
     if (!match) return false;
     const c = catalog();
     if (!c) { await reply(msg, NOT_CONFIGURED); return true; }
     const query = (match[1] ?? '').trim();
     if (!query) { await msg.reply(listPayload(c)); return true; }
     const found = findVideos(c, query);
-    if (!found.length) { await reply(msg, `「${query.slice(0, 50).replaceAll('`', 'ˈ')}」の動画は見つかりませんでした。\`gx v\` で一覧を表示できます。`); return true; }
+    if (!found.length) { await reply(msg, `「${query.slice(0, 50).replaceAll('`', 'ˈ')}」は見つかりませんでした。\`gx v\` で一覧を表示できます。`); return true; }
     if (found.length > 1) { await msg.reply(choicesPayload(c, query, found)); return true; }
-    const problem = checkSize(found[0]);
-    if (problem) { await reply(msg, problem); return true; }
     await msg.reply(videoPayload(c, found[0]));
     return true;
   }
@@ -156,9 +164,7 @@ export function createVideoCommands({readCatalog, reply, onError = () => {}}) {
     if (!interaction.isStringSelectMenu?.() || !/^video:(list|pick):/.test(interaction.customId)) return false;
     const c = catalog();
     const video = c && byKey(c, interaction.values[0]);
-    if (!video) { await interaction.reply({content: c ? 'この動画は一覧から外れました。`gx v` で一覧を出し直してください。' : NOT_CONFIGURED, flags: 64}); return true; }
-    const problem = checkSize(video);
-    if (problem) { await interaction.reply({content: problem, flags: 64}); return true; }
+    if (!video) { await interaction.reply({content: c ? 'この項目は一覧から外れました。`gx v` で一覧を出し直してください。' : NOT_CONFIGURED, flags: 64}); return true; }
     await interaction.deferReply({flags: 64});
     await interaction.editReply(videoPayload(c, video));
     return true;
@@ -170,9 +176,7 @@ export function createVideoCommands({readCatalog, reply, onError = () => {}}) {
     const share = interaction.options.getBoolean('public') ?? false;
     if (!c) { await interaction.reply({content: NOT_CONFIGURED, flags: 64}); return; }
     const video = byKey(c, query) ?? (() => { const f = findVideos(c, query); return f.length === 1 ? f[0] : null; })();
-    if (!video) { await interaction.reply({content: '動画を特定できませんでした。候補から選んでください。', flags: 64}); return; }
-    const problem = checkSize(video);
-    if (problem) { await interaction.reply({content: problem, flags: 64}); return; }
+    if (!video) { await interaction.reply({content: '項目を特定できませんでした。候補から選んでください。', flags: 64}); return; }
     await interaction.deferReply(share ? {} : {flags: 64});
     await interaction.editReply(videoPayload(c, video));
   }

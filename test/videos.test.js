@@ -31,7 +31,7 @@ test('lookup prefers exact, then prefix, then substring, and ignores punctuation
 });
 
 test('entries outside the catalog folder or incomplete are skipped', () => {
-  const c = loadVideoCatalog(fixture([...base, {kind: 'weapon', id: 'evil', name: 'Evil', file: '../../etc/passwd'}, {kind: 'weapon', id: 'x', name: 'X'}]));
+  const c = loadVideoCatalog(fixture([...base, {kind: 'weapon', id: 'evil', name: 'Evil', file: '../../etc/passwd'}, {kind: 'weapon', id: 'x'}]));
   assert.equal(c.videos.length, 4);
 });
 
@@ -63,6 +63,20 @@ test('autocomplete returns at most 25 and an empty query lists everything', () =
   assert.deepEqual(autocompleteChoices(c, 'weapon 12').map((x) => x.value), ['weapon:w12']);
 });
 
+test('entries without a video still show details, and oversize videos are not attached', () => {
+  const c = loadVideoCatalog(fixture([...base, {kind: 'passive', id: 'thorns', name: 'Thorns', effect: 'Reflects **15-35%**', facts: ['品質 0→100: 15% → 35%']}]));
+  const thorns = findVideos(c, 'thorns')[0];
+  const p = videoPayload(c, thorns);
+  assert.equal(p.files, undefined);
+  assert.match(JSON.stringify(p), /Reflects \*\*15-35%\*\*/);
+  assert.match(JSON.stringify(p), /品質 0→100/);
+  assert.match(JSON.stringify(p), /準備中/);
+  const big = videoPayload(c, c.videos[0], 1);
+  assert.equal(big.files, undefined);
+  assert.match(JSON.stringify(big), /大きすぎ/);
+  assert.equal(JSON.stringify(listPayload(c)).includes('▶ Lifesteal'), true);
+});
+
 test('size check rejects oversize and missing files', () => {
   const c = loadVideoCatalog(fixture(base));
   assert.equal(checkSize(c.videos[0]), null);
@@ -87,6 +101,7 @@ test('gx v routes to video, choices, list, not-found, and unconfigured', async (
   const reply = async (_m, text) => sent.push(text);
   const cmd = createVideoCommands({readCatalog: () => c, reply});
   assert.equal(await cmd.message(msg, 'gx vote'), false);
+  assert.equal(await cmd.message(msg, 'gx wiki lifesteal'), true);
   assert.equal(await cmd.message(msg, 'gx v lifesteal'), true);
   assert.equal(sent.at(-1).files[0].name, 'passivelifesteal.mp4');
   await cmd.message(msg, 'gx v scythe');
