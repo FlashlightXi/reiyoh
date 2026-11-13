@@ -16,6 +16,7 @@ import { createBattleLogService } from './battle-log-links.js';
 import { openObservations, snapshotMessage } from './observations.js';
 import { createAiCommands } from './ai-commands.js';
 import { createCollectionCommands, normalizeCommand } from './collection-commands.js';
+import { createCatalogReader, createVideoCommands } from './videos.js';
 import { blackjackSettingText, createBlackjackHelper } from './blackjack.js';
 
 const config = readConfig();
@@ -100,6 +101,7 @@ const collectionCommands = createCollectionCommands({ config, state, writer, sto
   isManager: (message) => message.member?.permissions.has(PermissionFlagsBits.ManageGuild) });
 
 const aiCommands=createAiCommands({config});
+const videoCommands = createVideoCommands({ readCatalog: createCatalogReader(config.videosFile), reply, onError: reportError });
 
 async function saveResponseRecords(message, result) {
   const operations = [battleLogs.capture(message, { input: tracker.responses.get(message.id) })];
@@ -110,7 +112,10 @@ async function saveResponseRecords(message, result) {
 }
 
 const slashG = new SlashCommandBuilder().setName('g').setDescription('Reiyo の操作')
-  .addSubcommand((command) => command.setName('x').setDescription('カウントダウン絵文字を一覧表示'));
+  .addSubcommand((command) => command.setName('x').setDescription('カウントダウン絵文字を一覧表示'))
+  .addSubcommand((command) => command.setName('video').setDescription('パッシブ・武器・編成の効果と説明動画を表示')
+    .addStringOption((option) => option.setName('name').setDescription('passive・weapon・チーム編成の名前').setRequired(true).setAutocomplete(true))
+    .addBooleanOption((option) => option.setName('public').setDescription('チャンネルの全員に表示する（既定は自分だけ）')));
 
 async function registerSlashG(guild) {
   try {
@@ -118,7 +123,7 @@ async function registerSlashG(guild) {
     const existing = commands.find((command) => command.name === 'g');
     if (existing) await existing.edit(slashG.toJSON());
     else await guild.commands.create(slashG.toJSON());
-    console.log(`Registered /g x in ${guild.id}`);
+    console.log(`Registered /g x, /g video in ${guild.id}`);
   } catch (error) { reportError(error); }
 }
 
@@ -155,12 +160,23 @@ client.on('interactionCreate', async (interaction) => {
     try { await handlePetPage(interaction,config,client.user.id); } catch(error) { reportError(error); }
     return;
   }
+  if (interaction.isAutocomplete() && interaction.commandName === 'g') {
+    if (!scopeReady || interaction.guildId !== config.guildId) return;
+    try { await videoCommands.autocomplete(interaction); } catch (error) { reportError(error); }
+    return;
+  }
+  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('video:')) {
+    if (!scopeReady || interaction.guildId !== config.guildId) return;
+    try { await videoCommands.select(interaction); } catch (error) { reportError(error); }
+    return;
+  }
   if (!interaction.isChatInputCommand() || interaction.commandName !== 'g') return;
   try {
     if (!scopeReady || interaction.guildId !== config.guildId) {
       await interaction.reply({ content: 'このサーバーは対象外、または起動準備中です。', flags: MessageFlags.Ephemeral });
       return;
     }
+    if (interaction.options.getSubcommand() === 'video') { await videoCommands.slash(interaction); return; }
     if (interaction.options.getSubcommand() !== 'x') return;
     const body = config.channelIds.includes(interaction.channelId)
       ? emojiList(emojis)
@@ -178,6 +194,7 @@ client.on('messageCreate', async (message) => {
     const command = normalized.toLowerCase();
     if (!scopeReady || message.guildId !== config.guildId) return;
     if (!message.author.bot && await aiCommands(message, normalized)) return;
+    if (!message.author.bot && await videoCommands.message(message, normalized)) return;
     const blackjackCommand = /^gx (?:bj|blackjack)(?:\s+(on|off))?$/.exec(command);
     if (!message.author.bot && blackjackCommand) {
       try {
