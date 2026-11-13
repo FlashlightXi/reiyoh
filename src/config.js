@@ -28,6 +28,7 @@ export function readConfig() {
     channelIds,
     logPath: path.resolve(process.env.LOG_PATH?.trim() || 'data/owo-messages.jsonl'),
     statePath: path.resolve(process.env.STATE_PATH?.trim() || 'data/state.json'),
+    videosFile: process.env.REIYOH_VIDEOS_FILE?.trim() ? path.resolve(process.env.REIYOH_VIDEOS_FILE.trim()) : null,
     emojiMapPath: path.resolve(process.env.EMOJI_MAP_PATH?.trim() || 'aa.txt'),
   };
 }

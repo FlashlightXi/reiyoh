@@ -14,6 +14,7 @@ export const HELP = `**Reiyo · 情報と相談**
 \`gx briefing\` — 相談用の情報を書き出す
 \`gx logs\` / \`gx logs export\` — 戦闘URLの記録切替・取得
 \`gx emoji\` — カウントダウン絵文字
+\`gx v 名前\` / \`gx v\` — 説明動画・一覧
 \`gx admin\` — 収集設定・記録の診断（管理者向け）`;
 const ADMIN_HELP = `**Reiyo · 管理**
 \`gx collect status\` — 収集状況
