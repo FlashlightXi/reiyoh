@@ -3,7 +3,7 @@ import {handlePetPage} from './pet-pagination.js';
 import {emojiText} from './display.js';
 import {
   Client, ContainerBuilder, GatewayIntentBits, MessageFlags, Partials,
-  PermissionFlagsBits, SlashCommandBuilder, TextDisplayBuilder,
+  PermissionFlagsBits, Routes, SlashCommandBuilder, TextDisplayBuilder,
 } from 'discord.js';
 import path from 'node:path';
 import { readConfig } from './config.js';
@@ -16,6 +16,7 @@ import { createBattleLogService } from './battle-log-links.js';
 import { openObservations, snapshotMessage } from './observations.js';
 import { createAiCommands } from './ai-commands.js';
 import { createCollectionCommands, normalizeCommand } from './collection-commands.js';
+import { blackjackSettingText, createBlackjackHelper } from './blackjack.js';
 
 const config = readConfig();
 const state = await loadState(config.statePath);
@@ -35,6 +36,14 @@ const client = new Client({ intents: [
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.MessageContent,
 ], partials: [Partials.Message] });
+const blackjack = createBlackjackHelper({
+  state, writer, owoBotId: config.owoBotId, onError: reportError,
+  react: (channelId, messageId, emoji) => client.rest.put(Routes.channelMessageOwnReaction(channelId, messageId, encodeURIComponent(emoji))),
+  unreact: (channelId, messageId, emoji) => client.rest.delete(Routes.channelMessageOwnReaction(channelId, messageId, encodeURIComponent(emoji))),
+  // Default avatars carry no user ID; fall back to a cached member with the exact username.
+  resolveOwner: (username, message) => client.guilds.cache.get(message.guildId ?? message.guild_id)
+    ?.members.cache.find((member) => member.user.username === username)?.id ?? null,
+});
 const battleLogs = await createBattleLogService({
   state, writer, owoBotId: config.owoBotId,
   filePath: path.join(path.dirname(config.statePath), 'battle-log-links.jsonl'),
@@ -135,6 +144,9 @@ client.on('guildCreate', (guild) => { if (scopeReady && guild.id === config.guil
 client.on('raw', (packet) => {
   if (!scopeReady || packet.t !== 'MESSAGE_UPDATE') return;
   try { observations.capture(packet.d, 'update', config); } catch (error) { reportError(error); }
+  if (packet.d?.guild_id === config.guildId && config.channelIds.includes(packet.d.channel_id)) {
+    try { blackjack.observe(packet.d, 'update'); } catch (error) { reportError(error); }
+  }
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -166,9 +178,21 @@ client.on('messageCreate', async (message) => {
     const command = normalized.toLowerCase();
     if (!scopeReady || message.guildId !== config.guildId) return;
     if (!message.author.bot && await aiCommands(message, normalized)) return;
+    const blackjackCommand = /^gx (?:bj|blackjack)(?:\s+(on|off))?$/.exec(command);
+    if (!message.author.bot && blackjackCommand) {
+      try {
+        const on = await blackjack.setEnabled(message.author.id, blackjackCommand[1] ? blackjackCommand[1] === 'on' : undefined);
+        await reply(message, blackjackSettingText(on));
+      } catch (error) {
+        reportError(error);
+        await reply(message, '設定を保存できませんでした。切替前の状態のままです。');
+      }
+      return;
+    }
     if (!message.author.bot && await collectionCommands(message, command)) return;
     if (!config.channelIds.includes(message.channelId)) return;
     if (message.author.id === config.owoBotId) {
+      try { blackjack.observe(message, 'create'); } catch (error) { reportError(error); }
       const result = tracker.observeResponse(message);
       await capture(message, 'create');
       await saveResponseRecords(message, result);
