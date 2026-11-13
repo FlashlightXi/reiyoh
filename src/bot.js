@@ -41,7 +41,8 @@ const blackjack = createBlackjackHelper({
   state, writer, owoBotId: config.owoBotId, onError: reportError,
   react: (channelId, messageId, emoji) => client.rest.put(Routes.channelMessageOwnReaction(channelId, messageId, encodeURIComponent(emoji))),
   unreact: (channelId, messageId, emoji) => client.rest.delete(Routes.channelMessageOwnReaction(channelId, messageId, encodeURIComponent(emoji))),
-  removeReaction: (channelId, messageId, emoji, userId) => client.rest.delete(Routes.channelMessageUserReaction(channelId, messageId, encodeURIComponent(emoji), userId)),
+  // Clears every reaction of one emoji. Never remove the player's reaction alone: OwO counts that as a click.
+  clearEmoji: (channelId, messageId, emoji) => client.rest.delete(Routes.channelMessageReaction(channelId, messageId, encodeURIComponent(emoji))),
   // Default avatars carry no user ID; fall back to a cached member with the exact username.
   resolveOwner: (username, message) => client.guilds.cache.get(message.guildId ?? message.guild_id)
     ?.members.cache.find((member) => member.user.username === username)?.id ?? null,

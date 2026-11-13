@@ -144,20 +144,22 @@ const RECENT_LIMIT = 200;
 const other = (emoji) => (emoji === HIT ? STAND : HIT);
 const statusOf = (error) => error?.status ?? error?.httpStatus ?? error?.code;
 
-// Leaves only the better choice on OwO's message:
-// - once OwO has dealt the next card, removes the player's previous click so the next choice is one fresh click,
-// - removes OwO's reaction for the worse choice (needs Manage Messages; the player's own reactions are never touched),
-// - re-adds the better choice as Reiyo's reaction when OwO's one was removed earlier, so it stays clickable.
+// Leaves only the better choice on OwO's message (needs Manage Messages):
+// - clears every reaction of the worse emoji (OwO's and the player's) at once,
+// - when OwO deals the next card, clears both emojis and re-adds the better one as Reiyo's reaction,
+//   so the next choice is always one fresh click.
+// Never removes the player's reaction one by one: OwO treats a removal of the player's reaction as a click,
+// whereas clearing a whole emoji (MESSAGE_REACTION_REMOVE_EMOJI) and Reiyo's own reactions are ignored by OwO.
 // OwO's collector only checks which emoji the player adds, so who added the reaction first does not matter.
 // Without Manage Messages it falls back to marking the better choice with Reiyo's own reaction.
 export function createBlackjackHelper({
-  state, writer, owoBotId, react, unreact, removeReaction, resolveOwner = () => null,
+  state, writer, owoBotId, react, unreact, clearEmoji, resolveOwner = () => null,
   onError = () => {}, initialDelayMs = 1500, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
   state.users ??= {};
   const games = new Map(); // messageId -> per-game reaction state
   let settings = Promise.resolve();
-  let canPrune = typeof removeReaction === 'function';
+  let canClear = typeof clearEmoji === 'function';
 
   const enabled = (userId) => Boolean(userId && state.users[userId]?.blackjackHint?.enabled);
 
@@ -183,43 +185,28 @@ export function createBlackjackHelper({
   function track(messageId, channelId) {
     let entry = games.get(messageId);
     if (!entry) {
-      entry = { channelId, want: null, own: null, removed: new Set(), ownerReacted: new Set(), hand: null, chain: Promise.resolve(), started: false };
+      entry = { channelId, want: null, own: null, hand: null, chain: Promise.resolve(), started: false };
       games.set(messageId, entry);
       if (games.size > RECENT_LIMIT) games.delete(games.keys().next().value);
     }
     return entry;
   }
 
-  // Remove OwO's reaction; false when it is not there (yet) or the permission is missing.
-  async function pruneOwo(entry, messageId, emoji) {
-    if (!canPrune || entry.removed.has(emoji)) return entry.removed.has(emoji);
+  // Clear every reaction of one emoji; false without the permission (then we fall back to marking).
+  async function clear(entry, messageId, emoji) {
+    if (!canClear) return false;
     try {
-      await removeReaction(entry.channelId, messageId, emoji, owoBotId);
-      entry.removed.add(emoji);
-      return true;
+      await clearEmoji(entry.channelId, messageId, emoji);
     } catch (error) {
       const status = statusOf(error);
-      if (status === 403 || status === 50013) { canPrune = false; return false; }
-      if (status === 404 || status === 10014) return false; // OwO has not added it yet; the reaction event handles it.
-      throw error;
+      if (status === 403 || status === 50013) { canClear = false; return false; }
+      if (status !== 404 && status !== 10014) throw error; // nothing to clear yet
     }
+    if (entry.own === emoji) entry.own = null;
+    return true;
   }
 
-  // After OwO has acted on the player's click, clear it so the next choice is a single fresh click.
-  async function clearOwner(entry, messageId) {
-    if (!canPrune || !entry.ownerId) return;
-    for (const emoji of [...entry.ownerReacted]) {
-      try { await removeReaction(entry.channelId, messageId, emoji, entry.ownerId); }
-      catch (error) {
-        const status = statusOf(error);
-        if (status === 403 || status === 50013) { canPrune = false; return; }
-        if (status !== 404 && status !== 10014) throw error;
-      }
-      entry.ownerReacted.delete(emoji);
-    }
-  }
-
-  async function apply(entry, messageId) {
+  async function apply(entry, messageId, handChanged) {
     const want = entry.want;
     if (!want) {
       if (entry.own) { await unreact(entry.channelId, messageId, entry.own); entry.own = null; }
@@ -227,10 +214,10 @@ export function createBlackjackHelper({
       return;
     }
     if (entry.own && entry.own !== want) { await unreact(entry.channelId, messageId, entry.own); entry.own = null; }
-    await pruneOwo(entry, messageId, other(want));
-    // Keep the better choice clickable: add it ourselves when OwO's is gone, or as a marker without the permission.
-    const needOwn = entry.removed.has(want) || !canPrune;
-    if (needOwn && entry.own !== want) { await react(entry.channelId, messageId, want); entry.own = want; }
+    await clear(entry, messageId, other(want));
+    // After a new card, also reset the better emoji so the player's previous click is gone.
+    if (handChanged) await clear(entry, messageId, want);
+    if (entry.own !== want) { await react(entry.channelId, messageId, want); entry.own = want; }
   }
 
   // event: 'create' for the first send, 'update' for edits (hit, stand, resume).
@@ -257,33 +244,24 @@ export function createBlackjackHelper({
         if (event === 'create' && initialDelayMs > 0) await sleep(initialDelayMs);
       }
       const handChanged = entry.hand !== null && entry.hand !== hand;
+      // Gateway often sends the same edit twice; skip states already applied.
+      if (entry.hand === hand && entry.want === want && entry.own === want) return;
       entry.hand = hand;
       entry.want = want;
-      await apply(entry, messageId);
-      if (want && handChanged) await clearOwner(entry, messageId);
+      await apply(entry, messageId, handChanged);
     }).catch(onError);
     return advice;
   }
 
-  // Raw MESSAGE_REACTION_ADD: OwO adding the worse choice after we decided is removed right away.
+  // Raw MESSAGE_REACTION_ADD: OwO adding the worse choice after we cleared it is cleared again.
   function observeReaction(packet) {
-    const userId = packet?.user_id;
-    const messageId = packet?.message_id;
     const emoji = packet?.emoji?.name;
-    if (!messageId || (emoji !== HIT && emoji !== STAND)) return;
+    const messageId = packet?.message_id;
+    if (packet?.user_id !== owoBotId || !messageId || (emoji !== HIT && emoji !== STAND)) return;
     const entry = games.get(messageId);
     if (!entry) return;
-    if (userId && userId === entry.ownerId) { entry.ownerReacted.add(emoji); return; }
-    if (userId !== owoBotId) return;
     entry.chain = entry.chain.catch(() => {}).then(async () => {
-      if (!entry.want) return;
-      if (emoji === entry.want) {
-        entry.removed.delete(emoji);
-        if (entry.own === emoji && canPrune) { await unreact(entry.channelId, messageId, emoji); entry.own = null; }
-        return;
-      }
-      entry.removed.delete(emoji);
-      await pruneOwo(entry, messageId, emoji);
+      if (entry.want && emoji !== entry.want) await clear(entry, messageId, emoji);
     }).catch(onError);
   }
 
@@ -295,6 +273,6 @@ export function createBlackjackHelper({
 
 export function blackjackSettingText(on) {
   return on
-    ? `**blackjack 最適手: ON**\nOwO blackjack の進行中、最適でない方のリアクション（${HIT} ヒット / ${STAND} スタンド）を令夭が外し、押せるのを最適手の1つだけにします。カードが増えるたびに選び直し、押した後の本人のリアクションも外すので、毎回残っている1つを1回押すだけです。\n-# 令夭に「メッセージの管理」権限が無いチャンネルでは、最適手に令夭のリアクションを重ねて示します。52枚1デッキ・ディーラーは17以上で停止・同点と両者バーストは引き分け、という公開版OwOのルールで期待値を厳密計算しています。\`gx bj\` でOFF。`
+    ? `**blackjack 最適手: ON**\nOwO blackjack の進行中、最適でない方のリアクション（${HIT} ヒット / ${STAND} スタンド）を令夭がまとめて消し、押せるのを最適手の1つだけにします。カードが増えるたびに両方を消して最適手を令夭が付け直すので、毎回残っている1つを1回押すだけです。\n-# 令夭に「メッセージの管理」権限が無いチャンネルでは、最適手に令夭のリアクションを重ねて示します。52枚1デッキ・ディーラーは17以上で停止・同点と両者バーストは引き分け、という公開版OwOのルールで期待値を厳密計算しています。\`gx bj\` でOFF。`
     : `**blackjack 最適手: OFF**\n令夭はリアクションに触れません。\`gx bj\` で再びONにできます。`;
 }
