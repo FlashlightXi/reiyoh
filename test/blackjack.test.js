@@ -136,3 +136,39 @@ test('OwO以外の投稿は無視する', async () => {
   await helper.pending();
   assert.deepEqual(calls, []);
 });
+
+test('autoモード: 押した後もヒットが最適なら本人の👊を外して次のヒットを進める', async () => {
+  const calls = [];
+  const { helper, state } = setup({ removeReaction: async (c, m, e, u) => { calls.push(['remove', e, u]); } });
+  const hint = await helper.setAuto(USER);
+  assert.deepEqual(hint, { enabled: true, auto: true });
+  assert.deepEqual(state.users[USER].blackjackHint, { enabled: true, auto: true });
+  helper.observe(hand('<a:2cf:3> <a:3hf:4>', '<a:10df:1> <:cardback:2>'), 'create');                // 5 vs 10: hit
+  helper.observeReaction(reaction(HIT, USER));                                                      // player hits
+  helper.observe(hand('<:2c:3> <:3h:4> <a:2sf:5>', '<a:10df:1> <:cardback:2>', { raw: true }), 'update'); // 7 vs 10: hit -> auto
+  await helper.pending();
+  assert.deepEqual(calls, [['remove', HIT, USER]]);
+  helper.observeReaction(reaction(HIT, USER), 'remove');
+  helper.observe(hand('<:2c:3> <:3h:4> <:2s:5> <a:2df:6>', '<a:10df:1> <:cardback:2>', { raw: true }), 'update'); // 9: hit, but player's 👊 is gone
+  await helper.pending();
+  assert.equal(calls.length, 1);                                                                    // next hit is the player's click
+});
+
+test('autoモードでもスタンドが最適なら外さない・autoがOFFなら外さない', async () => {
+  const calls = [];
+  const { helper } = setup({ removeReaction: async (c, m, e, u) => { calls.push(['remove', e, u]); } });
+  await helper.setAuto(USER, true);
+  helper.observe(hand('<a:10cf:3> <a:2hf:4>', '<a:4df:1> <:cardback:2>'), 'create');
+  helper.observeReaction(reaction(HIT, USER));
+  helper.observe(hand('<:10c:3> <:2h:4> <a:8sf:5>', '<a:4df:1> <:cardback:2>', { raw: true }), 'update'); // 20: stand
+  await helper.pending();
+  assert.deepEqual(calls, []);
+  assert.deepEqual(await helper.setAuto(USER, false), { enabled: true, auto: false });
+  const second = setup({ removeReaction: async (c, m, e, u) => { calls.push(['remove', e, u]); } });
+  await second.helper.setEnabled(USER, true);
+  second.helper.observe(hand('<a:2cf:3> <a:3hf:4>', '<a:10df:1> <:cardback:2>'), 'create');
+  second.helper.observeReaction(reaction(HIT, USER));
+  second.helper.observe(hand('<:2c:3> <:3h:4> <a:2sf:5>', '<a:10df:1> <:cardback:2>', { raw: true }), 'update');
+  await second.helper.pending();
+  assert.deepEqual(calls, []);
+});

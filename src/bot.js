@@ -16,7 +16,7 @@ import { createBattleLogService } from './battle-log-links.js';
 import { openObservations, snapshotMessage } from './observations.js';
 import { createAiCommands } from './ai-commands.js';
 import { createCollectionCommands, normalizeCommand } from './collection-commands.js';
-import { blackjackSettingText, createBlackjackHelper } from './blackjack.js';
+import { blackjackAutoText, blackjackSettingText, createBlackjackHelper } from './blackjack.js';
 
 const config = readConfig();
 const state = await loadState(config.statePath);
@@ -43,6 +43,8 @@ const blackjack = createBlackjackHelper({
   unreact: (channelId, messageId, emoji) => client.rest.delete(Routes.channelMessageOwnReaction(channelId, messageId, encodeURIComponent(emoji))),
   // Clears every reaction of one emoji. Never remove the player's reaction alone: OwO counts that as a click.
   clearEmoji: (channelId, messageId, emoji) => client.rest.delete(Routes.channelMessageReaction(channelId, messageId, encodeURIComponent(emoji))),
+  // Only for `gx bj auto`: removing the player's 👊 makes OwO hit again.
+  removeReaction: (channelId, messageId, emoji, userId) => client.rest.delete(Routes.channelMessageUserReaction(channelId, messageId, encodeURIComponent(emoji), userId)),
   // Default avatars carry no user ID; fall back to a cached member with the exact username.
   resolveOwner: (username, message) => client.guilds.cache.get(message.guildId ?? message.guild_id)
     ?.members.cache.find((member) => member.user.username === username)?.id ?? null,
@@ -145,8 +147,8 @@ client.on('guildCreate', (guild) => { if (scopeReady && guild.id === config.guil
 
 // Raw Gateway edits preserve intermediate states without fetching each message via REST.
 client.on('raw', (packet) => {
-  if (scopeReady && packet.t === 'MESSAGE_REACTION_ADD') {
-    try { blackjack.observeReaction(packet.d); } catch (error) { reportError(error); }
+  if (scopeReady && (packet.t === 'MESSAGE_REACTION_ADD' || packet.t === 'MESSAGE_REACTION_REMOVE')) {
+    try { blackjack.observeReaction(packet.d, packet.t === 'MESSAGE_REACTION_ADD' ? 'add' : 'remove'); } catch (error) { reportError(error); }
     return;
   }
   if (!scopeReady || packet.t !== 'MESSAGE_UPDATE') return;
@@ -185,11 +187,12 @@ client.on('messageCreate', async (message) => {
     const command = normalized.toLowerCase();
     if (!scopeReady || message.guildId !== config.guildId) return;
     if (!message.author.bot && await aiCommands(message, normalized)) return;
-    const blackjackCommand = /^gx (?:bj|blackjack)(?:\s+(on|off))?$/.exec(command);
+    const blackjackCommand = /^gx (?:bj|blackjack)(?:\s+(auto))?(?:\s+(on|off))?$/.exec(command);
     if (!message.author.bot && blackjackCommand) {
       try {
-        const on = await blackjack.setEnabled(message.author.id, blackjackCommand[1] ? blackjackCommand[1] === 'on' : undefined);
-        await reply(message, blackjackSettingText(on));
+        const value = blackjackCommand[2] ? blackjackCommand[2] === 'on' : undefined;
+        if (blackjackCommand[1]) await reply(message, blackjackAutoText(await blackjack.setAuto(message.author.id, value)));
+        else await reply(message, blackjackSettingText(await blackjack.setEnabled(message.author.id, value)));
       } catch (error) {
         reportError(error);
         await reply(message, '設定を保存できませんでした。切替前の状態のままです。');
