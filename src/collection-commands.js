@@ -7,6 +7,8 @@ export const HELP = `**Reiyo · 情報と相談**
 \`g\` — いつものタイマー
 \`gai 相談内容\` — 手持ちを調べてAIに相談
 \`gx team\` — 編成・装備・出典
+\`gx team @相手\` / \`gx team list\` — 他の人の編成（このチャンネルで表示されたもの）
+\`gx team hide\` / \`gx team show\` — 自分の編成を他の人に見せるか切替
 \`gx pets\` — 観測したペット情報
 \`gx boss\` / \`gx boss logs\` — 最新ボス・本人の詳細ログ
 \`gx battle\` — 記録した勝敗と直近の戦闘
@@ -23,6 +25,14 @@ const ADMIN_HELP = `**Reiyo · 管理**
 \`gx inspect メッセージID\` — 編集履歴
 \`gx debug\` — タイマーの診断`;
 
+export function teamText(history, emptyText) {
+  const text=history.latestDisplays.slice(-6).reverse().map(r=>
+    `**${r.formation.presetPage ? 'プリセット表示 '+r.formation.presetPage : '番号不明'}**\n`+
+    r.formation.slots.map(s=>`${s.position}. ${s.species?.emojiId ? `<a:${s.species.name}:${s.species.emojiId}>` : s.species?.name ?? '種別不明'} Lv${s.level ?? '?'} / ${s.weaponId ?? '装備ID未確認'}`).join('\n')+
+    `\n${r.source.url}`).join('\n');
+  return `${text || emptyText}\n表示履歴です。現在選択中のチームは追加確認が必要です。`.slice(0,3800);
+}
+
 export function normalizeCommand(content = '') {
   const text=content.trim(),lower=text.toLowerCase();
   const legacy={gsetup:'gx collect on',gdisable:'gx collect off',gxbl:'gx logs','gxbl export':'gx logs export'};
@@ -36,7 +46,7 @@ export function createCollectionCommands({ config, state, writer, store, bosses,
   let settings = Promise.resolve();
   const saveSettings = (change) => {
     const result = settings.catch(() => {}).then(async () => {
-      const previous = { channels: state.channels, observerBotIds: state.observerBotIds };
+      const previous = { channels: state.channels, observerBotIds: state.observerBotIds, teamHidden: state.teamHidden };
       change();
       try { await writer.save(state); }
       catch (error) { Object.assign(state, previous); await writer.save(state).catch(() => {}); throw error; }
@@ -98,17 +108,41 @@ export function createCollectionCommands({ config, state, writer, store, bosses,
       } finally {tools.close();}
       return true;
     }
+    const teamMatch = lower.match(/^gx team (?:<@!?(\d{17,20})>|(\d{17,20}))$/);
+    if (teamMatch || ['gx team list','gx team hide','gx team show'].includes(lower)) {
+      if (message.guildId !== config.guildId || !config.channelIds.includes(message.channelId)) {
+        await reply(message,'このチャンネルは収集対象外です。'); return true;
+      }
+      const hidden = new Set(state.teamHidden ?? []);
+      if (lower === 'gx team hide' || lower === 'gx team show') {
+        const hide = lower.endsWith(' hide');
+        await saveSettings(() => { const now = (state.teamHidden ?? []).filter(id => id !== message.author.id); state.teamHidden = hide ? [...now, message.author.id] : now; });
+        await reply(message, hide ? '他の人が `gx team @あなた` や `gx team list` であなたの編成を見られないようにしました。`gx team show` で戻せます。'
+          : '他の人が、このチャンネルで表示されたあなたの編成を `gx team @あなた` で見られるようにしました。`gx team hide` で隠せます。');
+        return true;
+      }
+      if (lower === 'gx team list') {
+        const owners = store.teamOwners(message.guildId, message.channelId).filter(r => !hidden.has(r.userId) || r.userId === message.author.id);
+        await reply(message, `**Reiyo · このチャンネルで編成を表示した人**\n${owners.map(r => `<@${r.userId}> · ${r.panels}件 · <t:${Math.floor(new Date(r.lastSeen).getTime()/1000)}:R>`).join('\n') || 'まだいません。'}\n\`gx team @相手\` で編成を確認できます。隠したい人は \`gx team hide\`。`);
+        return true;
+      }
+      const target = teamMatch[1] ?? teamMatch[2];
+      // Only this channel's panels: they were already posted here, so nothing from other channels is disclosed.
+      if (target !== message.author.id && hidden.has(target)) { await reply(message, 'この人は編成を非公開にしています。'); return true; }
+      const tools=createAdvisorTools({dbPath:path.join(path.dirname(config.statePath),'observations.sqlite'),
+        guildId:message.guildId,userId:target,channelIds:[message.channelId],includePersonalKnowledge:false});
+      try {
+        await reply(message, `**<@${target}> の編成（このチャンネル）**\n` + teamText(tools.invoke('get_formation_history'), 'このチャンネルにこの人のteam表示の記録がまだありません。'));
+      } finally { tools.close(); }
+      return true;
+    }
     if (lower === 'gx team' || lower === 'gx briefing') {
       const tools=createAdvisorTools({dbPath:path.join(path.dirname(config.statePath),'observations.sqlite'),
         guildId:message.guildId,userId:message.author.id,channelIds:[message.channelId]});
       try {
         const history=tools.invoke('get_formation_history');
         if(lower==='gx team') {
-          const text=history.latestDisplays.slice(-6).reverse().map(r=>
-            `**${r.formation.presetPage ? 'プリセット表示 '+r.formation.presetPage : '番号不明'}**\n`+
-            r.formation.slots.map(s=>`${s.position}. ${s.species?.emojiId ? `<a:${s.species.name}:${s.species.emojiId}>` : s.species?.name ?? '種別不明'} Lv${s.level ?? '?'} / ${s.weaponId ?? '装備ID未確認'}`).join('\n')+
-            `\n${r.source.url}`).join('\n');
-          await reply(message,`${text || 'このチャンネルに本人のteam表示の記録がまだありません。gtmで表示してください。'}\n表示履歴です。現在選択中のチームは追加確認が必要です。`.slice(0,3800));
+          await reply(message,teamText(history,'このチャンネルに本人のteam表示の記録がまだありません。gtmで表示してください。'));
         } else {
           const body=JSON.stringify({format:'reiyo-advisor-briefing-v1',player:tools.invoke('get_player_context'),formations:history,
             battles:tools.invoke('get_battle_summary'),knowledge:tools.invoke('search_strategy_knowledge',{query:''}).filter(card=>!card.ownerId),aiCalled:false},null,2);
